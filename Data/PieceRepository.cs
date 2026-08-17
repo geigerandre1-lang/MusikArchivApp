@@ -488,16 +488,38 @@ DELETE FROM instruments WHERE name = $name;";
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
 
+            var storedPaths = await GetSheetStoredPathsForPieceAsync(connection, id).ConfigureAwait(false);
+
             using var command = connection.CreateCommand();
             command.CommandText = "DELETE FROM pieces WHERE id = $id";
             command.Parameters.AddWithValue("$id", id);
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             await LocalChangeTracker.RecordChangeAsync().ConfigureAwait(false);
 
-            if (piece != null)
+            AppPaths.TryDeleteAllPieceNotenData(id, storedPaths);
+        }
+
+        private static async Task<List<string>> GetSheetStoredPathsForPieceAsync(SqliteConnection connection, long pieceId)
+        {
+            var paths = new List<string>();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT stored_path FROM sheet_files WHERE piece_id = $pieceId";
+            command.Parameters.AddWithValue("$pieceId", pieceId);
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
-                AppPaths.TryDeletePieceNotenDirectory(piece.Id, piece.Title);
+                if (!reader.IsDBNull(0))
+                {
+                    var path = reader.GetString(0);
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        paths.Add(path);
+                    }
+                }
             }
+
+            return paths;
         }
 
         public async Task DeleteAllPiecesAsync()

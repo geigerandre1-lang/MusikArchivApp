@@ -50,7 +50,7 @@ namespace MusikArchivApp.Data
             await connection.OpenAsync().ConfigureAwait(false);
 
             var legacyRoot = GetLegacyNotenRoot();
-            if (!Directory.Exists(legacyRoot))
+            if (!Directory.Exists(legacyRoot) && !Directory.Exists(AppPaths.GetDataRoot()))
             {
                 return;
             }
@@ -74,11 +74,22 @@ WHERE (file_data IS NULL OR length(file_data) = 0)
 
             foreach (var (id, storedPath, fileName) in pending)
             {
-                var normalized = storedPath.Replace('/', Path.DirectorySeparatorChar);
-                var fullPath = Path.Combine(legacyRoot, normalized);
+                var fullPath = SheetMusicPaths.ResolveStoredPath(storedPath);
                 if (!File.Exists(fullPath))
                 {
-                    continue;
+                    var normalized = storedPath.Replace('/', Path.DirectorySeparatorChar);
+                    var notenPrefix = "Noten" + Path.DirectorySeparatorChar;
+                    if (normalized.StartsWith(notenPrefix, StringComparison.OrdinalIgnoreCase)
+                        || normalized.StartsWith("Noten/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    fullPath = Path.Combine(AppPaths.GetNotenDirectory(), normalized);
+                    if (!File.Exists(fullPath))
+                    {
+                        continue;
+                    }
                 }
 
                 var bytes = await File.ReadAllBytesAsync(fullPath).ConfigureAwait(false);

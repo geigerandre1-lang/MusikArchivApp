@@ -178,7 +178,6 @@ ORDER BY sf.id";
                         ContentType = ReadNullableString(reader, 3),
                         ContentHash = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
                         ContentBase64 = Convert.ToBase64String(bytes),
-                        InstrumentId = reader.IsDBNull(6) ? null : reader.GetInt64(6),
                         InstrumentName = ReadNullableString(reader, 7),
                         InstrumentGroupId = reader.IsDBNull(8) ? null : reader.GetInt32(8),
                         SortOrder = reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
@@ -237,6 +236,8 @@ ORDER BY sf.id";
             Dictionary<string, long> pieceIdBySyncUid)
         {
             long pieceId;
+            var applyInstrumentSync = true;
+
             if (pieceIdBySyncUid.TryGetValue(dto.SyncUid, out pieceId))
             {
                 using var update = connection.CreateCommand();
@@ -249,7 +250,8 @@ UPDATE pieces SET
 WHERE id = $id AND (updated_at IS NULL OR updated_at <= $updatedAt)";
                 BindPieceSync(update, dto);
                 update.Parameters.AddWithValue("$id", pieceId);
-                await update.ExecuteNonQueryAsync().ConfigureAwait(false);
+                var rowsAffected = await update.ExecuteNonQueryAsync().ConfigureAwait(false);
+                applyInstrumentSync = rowsAffected > 0;
             }
             else
             {
@@ -267,6 +269,11 @@ SELECT last_insert_rowid();";
                 insert.Parameters.AddWithValue("$syncUid", dto.SyncUid);
                 pieceId = (long)(await insert.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);
                 pieceIdBySyncUid[dto.SyncUid] = pieceId;
+            }
+
+            if (!applyInstrumentSync)
+            {
+                return pieceId;
             }
 
             using (var delete = connection.CreateCommand())
@@ -304,34 +311,31 @@ SELECT last_insert_rowid();";
             SheetSyncDto dto)
         {
             var bytes = Convert.FromBase64String(dto.ContentBase64);
-            long? instrumentId = dto.InstrumentId;
-            if (!instrumentId.HasValue && !string.IsNullOrWhiteSpace(dto.InstrumentName))
+            long? instrumentId = null;
+            if (!string.IsNullOrWhiteSpace(dto.InstrumentName))
             {
                 instrumentId = await ResolveInstrumentIdAsync(connection, transaction, dto.InstrumentName).ConfigureAwait(false);
             }
 
             using var exists = connection.CreateCommand();
             exists.Transaction = transaction;
-            exists.CommandText = "SELECT id, content_hash, updated_at FROM sheet_files WHERE sync_uid = $syncUid";
+            exists.CommandText = "SELECT id, updated_at FROM sheet_files WHERE sync_uid = $syncUid";
             exists.Parameters.AddWithValue("$syncUid", dto.SyncUid);
 
             long? existingId = null;
-            string? existingHash = null;
             string? existingUpdatedAt = null;
             using (var reader = await exists.ExecuteReaderAsync().ConfigureAwait(false))
             {
                 if (await reader.ReadAsync().ConfigureAwait(false))
                 {
                     existingId = reader.GetInt64(0);
-                    existingHash = reader.IsDBNull(1) ? null : reader.GetString(1);
                     existingUpdatedAt = reader.IsDBNull(2) ? null : reader.GetString(2);
                 }
             }
 
             if (existingId.HasValue
                 && existingUpdatedAt != null
-                && DateTime.Parse(existingUpdatedAt) > dto.UpdatedAt
-                && string.Equals(existingHash, dto.ContentHash, StringComparison.OrdinalIgnoreCase))
+                && DateTime.Parse(existingUpdatedAt) > dto.UpdatedAt)
             {
                 return;
             }
@@ -345,9 +349,9 @@ UPDATE sheet_files SET
  piece_id = $pieceId, file_name = $fileName, stored_path = '', instrument_id = $instrumentId,
  instrument_group_id = $instrumentGroupId, sort_order = $sortOrder, file_data = $fileData,
  content_type = $contentType, content_hash = $contentHash, updated_at = $updatedAt, uploaded_at = $uploadedAt
-WHERE id = $id";
+WHERE id = $id AND (updated_at IS NULL OR updated_at <= $updatedAt)";
                 update.Parameters.AddWithValue("$id", existingId.Value);
-                BindSheetSync(update, pieceId, dto, bytes);
+                BindSheetSync(update, pieceId, dto, bytes, instrumentId);
                 await update.ExecuteNonQueryAsync().ConfigureAwait(false);
                 return;
             }
@@ -362,7 +366,7 @@ VALUES (
  $syncUid, $pieceId, $fileName, '', $instrumentId, $instrumentGroupId, $sortOrder,
  $uploadedAt, $fileData, $contentType, $contentHash, $updatedAt)";
             insert.Parameters.AddWithValue("$syncUid", dto.SyncUid);
-            BindSheetSync(insert, pieceId, dto, bytes);
+            BindSheetSync(insert, pieceId, dto, bytes, instrumentId);
             await insert.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
 
@@ -383,11 +387,11 @@ VALUES (
             command.Parameters.AddWithValue("$updatedAt", dto.UpdatedAt.ToString("o"));
         }
 
-        private static void BindSheetSync(SqliteCommand command, long pieceId, SheetSyncDto dto, byte[] bytes)
+        private static void BindSheetSync(SqliteCommand command, long pieceId, SheetSyncDto dto, byte[] bytes, long? instrumentId)
         {
             command.Parameters.AddWithValue("$pieceId", pieceId);
             command.Parameters.AddWithValue("$fileName", dto.FileName);
-            command.Parameters.AddWithValue("$instrumentId", dto.InstrumentId.HasValue ? dto.InstrumentId.Value : DBNull.Value);
+            command.Parameters.AddWithValue("$instrumentId", instrumentId.HasValue ? instrumentId.Value : DBNull.Value);
             command.Parameters.AddWithValue("$instrumentGroupId", dto.InstrumentGroupId.HasValue ? dto.InstrumentGroupId.Value : DBNull.Value);
             command.Parameters.AddWithValue("$sortOrder", dto.SortOrder);
             command.Parameters.AddWithValue("$uploadedAt", dto.UpdatedAt.ToString("o"));

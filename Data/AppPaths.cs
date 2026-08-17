@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace MusikArchivApp.Data
 {
@@ -83,19 +85,89 @@ namespace MusikArchivApp.Data
 
         public static void TryDeletePieceNotenDirectory(long pieceId, string title)
         {
-            var dir = GetPieceNotenDirectory(pieceId, title);
-            if (!Directory.Exists(dir))
+            TryDeleteAllPieceNotenData(pieceId);
+        }
+
+        public static void TryDeleteAllPieceNotenData(long pieceId, IEnumerable<string>? storedPaths = null)
+        {
+            if (storedPaths != null)
+            {
+                foreach (var storedPath in storedPaths)
+                {
+                    if (string.IsNullOrWhiteSpace(storedPath))
+                    {
+                        continue;
+                    }
+
+                    var fullPath = SheetMusicPaths.ResolveStoredPath(storedPath);
+                    TryDeleteFile(fullPath);
+                    TryDeleteEmptyDirectory(Path.GetDirectoryName(fullPath));
+                }
+            }
+
+            var notenDir = GetNotenDirectory();
+            if (!Directory.Exists(notenDir))
+            {
+                return;
+            }
+
+            foreach (var dir in Directory.GetDirectories(notenDir, $"{pieceId}_*"))
+            {
+                TryDeleteDirectory(dir);
+            }
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            if (!File.Exists(path))
             {
                 return;
             }
 
             try
             {
-                Directory.Delete(dir, recursive: true);
+                File.Delete(path);
             }
             catch
             {
-                // Ordner evtl. gesperrt – Löschen in DB hat Vorrang
+                // ignore locked files
+            }
+        }
+
+        private static void TryDeleteEmptyDirectory(string? directory)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                return;
+            }
+
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory);
+                }
+            }
+            catch
+            {
+                // ignore locked directories
+            }
+        }
+
+        private static void TryDeleteDirectory(string directory)
+        {
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch
+            {
+                // ignore locked directories
             }
         }
 

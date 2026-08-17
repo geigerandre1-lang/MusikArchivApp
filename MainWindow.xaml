@@ -704,41 +704,9 @@
                         </StackPanel>
                     </GroupBox>
 
-                    <!-- Synchronisation -->
-                    <GroupBox Header="Synchronisation (Server)" Margin="0,0,0,16">
-                        <StackPanel Margin="8">
-                            <TextBlock Text="Server-URL" Margin="0,0,0,4"/>
-                            <TextBox x:Name="SyncServerUrlTextBox" Margin="0,0,0,8"/>
-
-                            <TextBlock Text="API-Schlüssel (optional)" Margin="0,0,0,4"/>
-                            <PasswordBox x:Name="SyncApiKeyBox" Margin="0,0,0,8"/>
-
-                            <TextBlock Text="Web-App Passwort (Ansicht)" Margin="0,0,0,4"/>
-                            <PasswordBox x:Name="SyncWebPasswordBox" Margin="0,0,0,4"/>
-                            <TextBlock Text="Standard: admin · wird beim Hochladen an den Server übertragen." Foreground="#888888" FontSize="11" Margin="0,0,0,8"/>
-
-                            <TextBlock Text="Sync-Warnung anzeigen nach (Tagen)" Margin="0,0,0,4"/>
-                            <TextBox x:Name="SyncWarningDaysTextBox" Width="80" HorizontalAlignment="Left" Margin="0,0,0,4"/>
-                            <TextBlock Text="0 = Warnbanner deaktivieren" Foreground="#888888" FontSize="11" Margin="0,0,0,8"/>
-
-                            <TextBlock x:Name="LastLocalChangeText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,4"/>
-                            <TextBlock x:Name="SyncStatusText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,8"/>
-
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Button Content="Verbindung testen" Width="130" Margin="0,0,8,0" Click="SyncTestConnection_Click"/>
-                                <Button Content="Konfiguration speichern" Width="150" Click="SyncSaveConfig_Click"/>
-                            </StackPanel>
-
-                            <StackPanel Orientation="Horizontal">
-                                <Button Content="⬆ Zum Server hochladen" Width="160" Margin="0,0,8,0" Click="SyncPush_Click"/>
-                                <Button Content="⬇ Vom Server laden" Width="160" Click="SyncPull_Click"/>
-                            </StackPanel>
-                        </StackPanel>
-                    </GroupBox>
-
                     <!-- Admin -->
-                    <GroupBox Header="Administration" Margin="0,0,0,16">
-                        <StackPanel>
+                    <GroupBox Header="Administration" Margin="0,0,0,16" Visibility="Visible">
+                        <StackPanel Margin="8">
                             <StackPanel Visibility="{Binding AdminLoginVisibility}">
                                 <TextBlock Text="Admin-Anmeldung" FontWeight="Bold" Margin="0,0,0,4" />
                                 <StackPanel Orientation="Horizontal">
@@ -763,6 +731,40 @@
                                             Command="{Binding DeleteAllPiecesCommand}" />
                                     <Button Content="Abmelden" Width="90" Click="AdminLogoutButton_Click" />
                                 </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <!-- Synchronisation -->
+                    <GroupBox Header="Synchronisation" Margin="0,0,0,16">
+                        <StackPanel Margin="8">
+                            <StackPanel x:Name="SyncSettingsPanel" Visibility="Collapsed">
+                                <TextBlock Text="Server-URL" Margin="0,0,0,4"/>
+                                <TextBox x:Name="SyncServerUrlTextBox" Margin="0,0,0,8"/>
+
+                                <TextBlock Text="API-Schlüssel (optional)" Margin="0,0,0,4"/>
+                                <PasswordBox x:Name="SyncApiKeyBox" Margin="0,0,0,8"/>
+
+                                <TextBlock Text="Web-App Passwort (Ansicht)" Margin="0,0,0,4"/>
+                                <PasswordBox x:Name="SyncWebPasswordBox" Margin="0,0,0,4"/>
+                                <TextBlock Text="Standard: admin · wird beim Hochladen an den Server übertragen." Foreground="#888888" FontSize="11" Margin="0,0,0,8"/>
+
+                                <TextBlock Text="Sync-Warnung anzeigen nach (Tagen)" Margin="0,0,0,4"/>
+                                <TextBox x:Name="SyncWarningDaysTextBox" Width="80" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+                                <TextBlock Text="0 = Warnbanner deaktivieren" Foreground="#888888" FontSize="11" Margin="0,0,0,8"/>
+
+                                <TextBlock x:Name="LastLocalChangeText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                <TextBlock x:Name="SyncStatusText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Button Content="Verbindung testen" Width="130" Margin="0,0,8,0" Click="SyncTestConnection_Click"/>
+                                    <Button Content="Konfiguration speichern" Width="150" Click="SyncSaveConfig_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="⬆ Zum Server hochladen" Width="160" Margin="0,0,8,0" Click="SyncPush_Click"/>
+                                <Button Content="⬇ Vom Server laden" Width="160" Click="SyncPull_Click"/>
                             </StackPanel>
                         </StackPanel>
                     </GroupBox>

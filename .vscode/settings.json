@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "dotnet build": true
+    },
+    "dotnet.defaultSolution": "Musikstückeditor.sln",
+    "dotnet.preferCSharpExtension": true,
+    "csharp.debug.buildBeforeLaunch": true,
+    "dotnet.run.buildBeforeLaunch": true
+}

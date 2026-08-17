@@ -1,0 +1,46 @@
+<Window x:Class="MusikArchivApp.SheetImportAssignmentDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Notendatei zuweisen"
+        Width="520" Height="460"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Quelldatei" FontWeight="SemiBold"/>
+        <TextBlock Grid.Row="1" x:Name="SourceFileText" TextWrapping="Wrap" Margin="0,4,0,12" Foreground="#444444"/>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="Instrumente zuweisen" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <CheckBox x:Name="GeneralCheckBox" Content="Allgemein / Gesamt" Margin="0,0,0,8"
+                      Checked="GeneralCheckBox_Changed" Unchecked="GeneralCheckBox_Changed"/>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="180">
+                <ItemsControl x:Name="InstrumentsList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                      Checked="InstrumentCheckBox_Changed" Unchecked="InstrumentCheckBox_Changed"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Margin="0,12,0,12">
+            <TextBlock Text="Generierte Dateinamen" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <TextBlock x:Name="PreviewText" TextWrapping="Wrap" Foreground="#555555" FontFamily="Consolas"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Abbrechen" Width="100" Margin="0,0,8,0" IsCancel="True"/>
+            <Button Content="Speichern" Width="100" IsDefault="True" Click="SaveButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

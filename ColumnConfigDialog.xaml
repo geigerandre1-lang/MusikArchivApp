@@ -1,0 +1,60 @@
+<Window x:Class="MusikArchivApp.ColumnConfigDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Spalteneigenschaften" Width="500" Height="420"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Spaltenauswahl" FontWeight="Bold" FontSize="13" Margin="0,0,0,10"/>
+
+        <!-- Main layout -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Verfügbare Spalten -->
+            <DockPanel Grid.Column="0" Margin="0,0,6,0">
+                <TextBlock DockPanel.Dock="Top" Text="Verfügbare Spalten" Margin="0,0,0,4" FontWeight="SemiBold"/>
+                <ListBox x:Name="AvailableListBox"
+                         MouseDoubleClick="AvailableListBox_MouseDoubleClick"/>
+            </DockPanel>
+
+            <!-- Add/Remove Buttons -->
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0">
+                <Button Content="Hinzufügen -&#x3e;" Width="130" Margin="0,0,0,6" Click="AddButton_Click"/>
+                <Button Content="Alle hinzufügen -&#x3e;" Width="130" Margin="0,0,0,14" Click="AddAllButton_Click"/>
+                <Button Content="&#x3c;- Entfernen" Width="130" Margin="0,0,0,6" Click="RemoveButton_Click"/>
+                <Button Content="&#x3c;- Alle entfernen" Width="130" Click="RemoveAllButton_Click"/>
+            </StackPanel>
+
+            <!-- Ausgewählte Spalten -->
+            <DockPanel Grid.Column="2" Margin="6,0,6,0">
+                <TextBlock DockPanel.Dock="Top" Text="Ausgewählte Spalten" Margin="0,0,0,4" FontWeight="SemiBold"/>
+                <ListBox x:Name="SelectedListBox"
+                         MouseDoubleClick="SelectedListBox_MouseDoubleClick"/>
+            </DockPanel>
+
+            <!-- Up/Down Buttons -->
+            <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="4,0,0,0">
+                <Button Content="Nach oben" Width="90" Margin="0,0,0,6" Click="MoveUpButton_Click"/>
+                <Button Content="Nach unten" Width="90" Click="MoveDownButton_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- OK / Abbrechen -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="OK" Width="80" Margin="0,0,8,0" IsDefault="True" Click="OkButton_Click"/>
+            <Button Content="Abbrechen" Width="90" IsCancel="True" Click="CancelButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

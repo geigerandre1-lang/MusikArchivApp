@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Musikarchiv – Web</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="loginScreen" class="login-screen">
+    <form id="loginForm" class="login-card">
+      <h1>Musikarchiv</h1>
+      <p class="muted">Passwortgeschützte Ansicht</p>
+      <label for="loginPassword">Passwort</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" required>
+      <button type="submit">Anmelden</button>
+      <p id="loginError" class="login-error hidden"></p>
+    </form>
+  </div>
+
+  <div id="appRoot" class="hidden">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/favicon.png" alt="" width="28" height="28" class="brand-icon">
+        <h1>Musikarchiv</h1>
+        <span id="statusBadge" class="badge">Angemeldet</span>
+      </div>
+      <div class="filters">
+        <input id="searchInput" type="search" placeholder="Suche (Titel, Komponist, Tags …)" autocomplete="off">
+        <select id="genreFilter"><option value="">Alle Gattungen</option></select>
+        <select id="cabinetFilter"><option value="">Alle Schränke</option></select>
+        <label class="checkbox-label">
+          <input id="withScoresFilter" type="checkbox">
+          Nur mit Noten
+        </label>
+        <label class="checkbox-label">
+          <input id="activeOnlyFilter" type="checkbox">
+          Nur im Probelokal
+        </label>
+        <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="piece-list-panel">
+        <div class="panel-header">
+          <h2>Stücke</h2>
+          <span id="pieceCount" class="muted">0</span>
+        </div>
+        <ul id="pieceList" class="piece-list"></ul>
+      </aside>
+
+      <section class="detail-panel">
+        <div id="emptyState" class="empty-state">
+          <p>Wähle ein Stück aus der Liste.</p>
+        </div>
+
+        <div id="detailView" class="detail-view hidden">
+          <div class="detail-header">
+            <div>
+              <h2 id="detailTitle"></h2>
+              <p id="detailMeta" class="muted"></p>
+              <p id="detailPath" class="path"></p>
+            </div>
+            <div class="detail-actions">
+              <button id="printPieceButton" type="button" class="secondary-button">Stückinfos drucken</button>
+            </div>
+          </div>
+          <div id="detailTags" class="tag-row"></div>
+
+          <div id="printPieceArea" class="detail-grid">
+            <div class="meta-card">
+              <h3>Metadaten</h3>
+              <dl id="detailFields"></dl>
+            </div>
+            <div class="meta-card">
+              <h3>Besetzung</h3>
+              <ul id="detailInstruments" class="chip-list"></ul>
+            </div>
+          </div>
+
+          <div class="sheets-section">
+            <h3>Notendateien</h3>
+            <ul id="sheetList" class="sheet-list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="preview-panel">
+        <div class="panel-header">
+          <h2>Vorschau</h2>
+          <div class="preview-actions">
+            <button id="printSheetButton" type="button" class="secondary-button hidden">Noten drucken</button>
+            <a id="openFileLink" class="link-button hidden" href="#" target="_blank" rel="noopener">In neuem Tab</a>
+          </div>
+        </div>
+        <div id="previewEmpty" class="empty-state">
+          <p>Notendatei auswählen.</p>
+        </div>
+        <div id="previewFrame" class="preview-frame hidden">
+          <iframe id="pdfPreview" title="PDF-Vorschau" class="hidden"></iframe>
+          <img id="imagePreview" alt="Notenvorschau" class="hidden">
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

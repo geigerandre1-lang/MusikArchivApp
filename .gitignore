@@ -1,0 +1,25 @@
+# Build
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Local data / runtime
+data/
+*.db
+*.db-journal
+column_config.json
+filter_column_config.json
+app_config.json
+
+# Node
+node_modules/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.log
+
+# Publish output (generated locally)
+publish/

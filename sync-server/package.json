@@ -1,0 +1,14 @@
+{
+  "name": "musikarchiv-sync-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sync-API für MusikArchivApp",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2"
+  }
+}

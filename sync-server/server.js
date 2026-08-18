@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS server_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  sync_uid TEXT PRIMARY KEY,
+  entity_type TEXT NOT NULL,
+  deleted_at TEXT NOT NULL
+);
 `);
 
 const DEFAULT_WEB_PASSWORD = 'admin';
@@ -288,9 +294,35 @@ app.get('/api/meta/filters', requireWebAuth, (_req, res) => {
   res.json({ genres, cabinets });
 });
 
+function applyTombstone(tombstone) {
+  const syncUid = tombstone.syncUid;
+  const entityType = String(tombstone.entityType || '').toLowerCase();
+  const deletedAt = tombstone.deletedAt || new Date().toISOString();
+
+  if (!syncUid) {
+    return;
+  }
+
+  if (entityType === 'sheet') {
+    db.prepare('DELETE FROM sheet_files WHERE sync_uid = ?').run(syncUid);
+  } else if (entityType === 'piece') {
+    db.prepare('DELETE FROM sheet_files WHERE piece_sync_uid = ?').run(syncUid);
+    db.prepare('DELETE FROM pieces WHERE sync_uid = ?').run(syncUid);
+  }
+
+  db.prepare(`
+    INSERT INTO sync_tombstones (sync_uid, entity_type, deleted_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(sync_uid) DO UPDATE SET
+      entity_type = excluded.entity_type,
+      deleted_at = excluded.deleted_at
+  `).run(syncUid, entityType, deletedAt);
+}
+
 app.post('/api/sync/push', requireApiKey, (req, res) => {
   const pieces = req.body?.pieces || [];
   const sheets = req.body?.sheets || [];
+  const tombstones = req.body?.tombstones || [];
 
   if (req.body?.webViewPassword) {
     setSetting('web_view_password', String(req.body.webViewPassword));
@@ -345,6 +377,10 @@ app.post('/api/sync/push', requireApiKey, (req, res) => {
   `);
 
   const tx = db.transaction(() => {
+    for (const tombstone of tombstones) {
+      applyTombstone(tombstone);
+    }
+
     for (const piece of pieces) {
       upsertPiece.run({
         syncUid: piece.syncUid,
@@ -381,10 +417,39 @@ app.post('/api/sync/push', requireApiKey, (req, res) => {
         updatedAt: sheet.updatedAt
       });
     }
+
+    const sheetsByPiece = new Map();
+    for (const sheet of sheets) {
+      if (!sheetsByPiece.has(sheet.pieceSyncUid)) {
+        sheetsByPiece.set(sheet.pieceSyncUid, new Set());
+      }
+      sheetsByPiece.get(sheet.pieceSyncUid).add(sheet.syncUid);
+    }
+
+    const reconcileDeletedAt = new Date().toISOString();
+    for (const piece of pieces) {
+      const clientSheetUids = sheetsByPiece.get(piece.syncUid) || new Set();
+      const serverSheets = db
+        .prepare('SELECT sync_uid FROM sheet_files WHERE piece_sync_uid = ?')
+        .all(piece.syncUid);
+
+      for (const row of serverSheets) {
+        if (!clientSheetUids.has(row.sync_uid)) {
+          db.prepare('DELETE FROM sheet_files WHERE sync_uid = ?').run(row.sync_uid);
+          db.prepare(`
+            INSERT INTO sync_tombstones (sync_uid, entity_type, deleted_at)
+            VALUES (?, 'sheet', ?)
+            ON CONFLICT(sync_uid) DO UPDATE SET
+              entity_type = excluded.entity_type,
+              deleted_at = excluded.deleted_at
+          `).run(row.sync_uid, reconcileDeletedAt);
+        }
+      }
+    }
   });
 
   tx();
-  res.json({ ok: true, pieces: pieces.length, sheets: sheets.length });
+  res.json({ ok: true, pieces: pieces.length, sheets: sheets.length, tombstones: tombstones.length });
 });
 
 app.get('/api/sync/pull', requireApiKey, (req, res) => {
@@ -398,12 +463,21 @@ app.get('/api/sync/pull', requireApiKey, (req, res) => {
     ? db.prepare('SELECT * FROM sheet_files WHERE updated_at > ? ORDER BY updated_at').all(since)
     : db.prepare('SELECT * FROM sheet_files ORDER BY updated_at').all();
 
+  const tombstoneRows = since
+    ? db.prepare('SELECT sync_uid, entity_type, deleted_at FROM sync_tombstones WHERE deleted_at > ? ORDER BY deleted_at').all(since)
+    : db.prepare('SELECT sync_uid, entity_type, deleted_at FROM sync_tombstones ORDER BY deleted_at').all();
+
   res.json({
     serverTime: new Date().toISOString(),
     pieces: pieceRows.map((row) => mapPieceRow(row)),
     sheets: sheetRows.map((row) => ({
       ...mapSheetMeta(row),
       contentBase64: Buffer.from(row.file_data).toString('base64')
+    })),
+    tombstones: tombstoneRows.map((row) => ({
+      syncUid: row.sync_uid,
+      entityType: row.entity_type,
+      deletedAt: row.deleted_at
     }))
   });
 });

@@ -5,8 +5,7 @@
         Title="Musikstück – Details"
         Width="860" MinWidth="820" Height="700"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResizeWithGrip"
-        Icon="Assets/app.ico">
+        ResizeMode="CanResizeWithGrip">
     <Window.Resources>
         <conv:HexColorToBrushConverter x:Key="HexColorToBrushConverter" />
         <conv:HexColorToForegroundBrushConverter x:Key="HexColorToForegroundBrushConverter" />

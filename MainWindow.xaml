@@ -3,8 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:conv="clr-namespace:MusikArchivApp.Converters"
         xmlns:loc="clr-namespace:MusikArchivApp.Localization"
-        Title="Musikarchiv" Height="650" Width="1100"
-        Icon="Assets/app.ico">
+        Title="Musikarchiv" Height="650" Width="1100">
     <Window.Resources>
         <SolidColorBrush x:Key="RequiredBackground" Color="#FFFFC0C0" />
 
@@ -723,7 +722,11 @@
                                         <TextBlock x:Name="AdminApiKeyText" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Border>
-                                <StackPanel Orientation="Horizontal">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Button Content="Duplikate bereinigen"
+                                            Width="170"
+                                            Margin="0,0,8,0"
+                                            Click="DuplicateCleanupButton_Click"/>
                                     <Button Content="Alle Musikstücke löschen"
                                             Width="200"
                                             Margin="0,0,8,0"
@@ -738,33 +741,44 @@
                     <!-- Synchronisation -->
                     <GroupBox Header="Synchronisation" Margin="0,0,0,16">
                         <StackPanel Margin="8">
-                            <StackPanel x:Name="SyncSettingsPanel" Visibility="Collapsed">
+                            <StackPanel Visibility="{Binding AdminActionsVisibility}">
                                 <TextBlock Text="Server-URL" Margin="0,0,0,4"/>
                                 <TextBox x:Name="SyncServerUrlTextBox" Margin="0,0,0,8"/>
-
-                                <TextBlock Text="API-Schlüssel (optional)" Margin="0,0,0,4"/>
-                                <PasswordBox x:Name="SyncApiKeyBox" Margin="0,0,0,8"/>
 
                                 <TextBlock Text="Web-App Passwort (Ansicht)" Margin="0,0,0,4"/>
                                 <PasswordBox x:Name="SyncWebPasswordBox" Margin="0,0,0,4"/>
                                 <TextBlock Text="Standard: admin · wird beim Hochladen an den Server übertragen." Foreground="#888888" FontSize="11" Margin="0,0,0,8"/>
 
-                                <TextBlock Text="Sync-Warnung anzeigen nach (Tagen)" Margin="0,0,0,4"/>
-                                <TextBox x:Name="SyncWarningDaysTextBox" Width="80" HorizontalAlignment="Left" Margin="0,0,0,4"/>
-                                <TextBlock Text="0 = Warnbanner deaktivieren" Foreground="#888888" FontSize="11" Margin="0,0,0,8"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                    <Button Content="Konfiguration speichern" Width="150" Margin="0,0,8,0" Click="SyncSaveConfig_Click"/>
+                                    <Button Content="Verbindung testen" Width="130" Click="SyncTestConnection_Click"/>
+                                </StackPanel>
 
-                                <TextBlock x:Name="LastLocalChangeText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,4"/>
-                                <TextBlock x:Name="SyncStatusText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <StackPanel x:Name="SyncAdvancedSettingsPanel" Visibility="Collapsed">
+                                    <TextBlock Text="API-Schlüssel (optional)" Margin="0,0,0,4"/>
+                                    <PasswordBox x:Name="SyncApiKeyBox" Margin="0,0,0,8"/>
 
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Button Content="Verbindung testen" Width="130" Margin="0,0,8,0" Click="SyncTestConnection_Click"/>
-                                    <Button Content="Konfiguration speichern" Width="150" Click="SyncSaveConfig_Click"/>
+                                    <TextBlock Text="Sync-Warnung anzeigen nach (Tagen)" Margin="0,0,0,4"/>
+                                    <TextBox x:Name="SyncWarningDaysTextBox" Width="80" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+                                    <TextBlock Text="0 = Warnbanner deaktivieren" Foreground="#888888" FontSize="11" Margin="0,0,0,8"/>
+
+                                    <TextBlock x:Name="LastLocalChangeText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                    <TextBlock x:Name="SyncStatusText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,8"/>
                                 </StackPanel>
                             </StackPanel>
 
+                            <TextBlock x:Name="SyncActivityText" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                            <ProgressBar x:Name="SyncProgressBar"
+                                         Height="14"
+                                         Minimum="0"
+                                         Maximum="100"
+                                         Visibility="Collapsed"
+                                         Margin="0,0,0,8"/>
+
                             <StackPanel Orientation="Horizontal">
-                                <Button Content="⬆ Zum Server hochladen" Width="160" Margin="0,0,8,0" Click="SyncPush_Click"/>
-                                <Button Content="⬇ Vom Server laden" Width="160" Click="SyncPull_Click"/>
+                                <Button x:Name="SyncPushButton" Content="⬆ Zum Server hochladen" Width="160" Margin="0,0,8,0" Click="SyncPush_Click"/>
+                                <Button x:Name="SyncPullButton" Content="⬇ Vom Server laden" Width="160" Margin="0,0,8,0" Click="SyncPull_Click"/>
+                                <Button x:Name="SyncStopUploadButton" Content="Stopp Upload" Width="120" Visibility="Collapsed" Click="SyncStopUpload_Click"/>
                             </StackPanel>
                         </StackPanel>
                     </GroupBox>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using MusikArchivApp.Models;
@@ -72,8 +73,11 @@ WHERE sync_uid IS NULL OR sync_uid = ''";
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
 
-        public async Task<SyncPushRequest> BuildPushPayloadAsync()
+        public async Task<SyncPushRequest> BuildPushPayloadAsync(
+            IProgress<(int current, int total)>? progress = null,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await EnsureSyncUidsAsync().ConfigureAwait(false);
 
             var payload = new SyncPushRequest();
@@ -132,8 +136,18 @@ ORDER BY p.id";
                 }
             }
 
+            var sheetCount = await CountSheetFilesAsync(connection).ConfigureAwait(false);
+            var totalSteps = Math.Max(1, pieceRows.Count + sheetCount);
+            var completedSteps = 0;
+
+            void ReportProgress()
+            {
+                progress?.Report((completedSteps, totalSteps));
+            }
+
             foreach (var row in pieceRows)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var instrumentNames = await GetInstrumentNamesAsync(connection, row.PieceId).ConfigureAwait(false);
                 payload.Pieces.Add(new PieceSyncDto
                 {
@@ -153,6 +167,9 @@ ORDER BY p.id";
                     UpdatedAt = row.UpdatedAt,
                     InstrumentNames = instrumentNames
                 });
+
+                completedSteps++;
+                ReportProgress();
             }
 
             using (var command = connection.CreateCommand())
@@ -169,6 +186,7 @@ ORDER BY sf.id";
                 using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
                 while (await reader.ReadAsync().ConfigureAwait(false))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var bytes = (byte[])reader.GetValue(5);
                     payload.Sheets.Add(new SheetSyncDto
                     {
@@ -183,14 +201,22 @@ ORDER BY sf.id";
                         SortOrder = reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
                         UpdatedAt = reader.IsDBNull(10) ? DateTime.UtcNow : DateTime.Parse(reader.GetString(10))
                     });
+
+                    completedSteps++;
+                    ReportProgress();
                 }
             }
 
+            payload.Tombstones = (await SyncTombstoneStore.GetAllAsync().ConfigureAwait(false)).ToList();
             return payload;
         }
 
-        public async Task ApplyPullPayloadAsync(SyncPullResponse response)
+        public async Task ApplyPullPayloadAsync(
+            SyncPullResponse response,
+            IProgress<(int current, int total)>? progress = null,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
 
@@ -209,24 +235,78 @@ ORDER BY sf.id";
                 }
             }
 
-            foreach (var pieceDto in response.Pieces.OrderBy(p => p.UpdatedAt))
+            var orderedPieces = response.Pieces.OrderBy(p => p.UpdatedAt).ToList();
+            var orderedSheets = response.Sheets.OrderBy(s => s.UpdatedAt).ToList();
+            var orderedTombstones = response.Tombstones.OrderBy(t => t.DeletedAt).ToList();
+            var totalSteps = Math.Max(1, orderedPieces.Count + orderedSheets.Count + orderedTombstones.Count);
+            var completedSteps = 0;
+
+            void ReportProgress()
             {
+                progress?.Report((completedSteps, totalSteps));
+            }
+
+            foreach (var pieceDto in orderedPieces)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 var pieceId = await UpsertPieceAsync(connection, transaction, pieceDto, pieceIdBySyncUid)
                     .ConfigureAwait(false);
                 pieceIdBySyncUid[pieceDto.SyncUid] = pieceId;
+                completedSteps++;
+                ReportProgress();
             }
 
-            foreach (var sheetDto in response.Sheets.OrderBy(s => s.UpdatedAt))
+            foreach (var sheetDto in orderedSheets)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!pieceIdBySyncUid.TryGetValue(sheetDto.PieceSyncUid, out var pieceId))
                 {
+                    completedSteps++;
+                    ReportProgress();
                     continue;
                 }
 
                 await UpsertSheetAsync(connection, transaction, pieceId, sheetDto).ConfigureAwait(false);
+                completedSteps++;
+                ReportProgress();
+            }
+
+            foreach (var tombstone in orderedTombstones)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await ApplyTombstoneAsync(connection, transaction, tombstone, pieceIdBySyncUid).ConfigureAwait(false);
+                completedSteps++;
+                ReportProgress();
             }
 
             await transaction.CommitAsync().ConfigureAwait(false);
+        }
+
+        private static async Task ApplyTombstoneAsync(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            SyncTombstoneDto tombstone,
+            Dictionary<string, long> pieceIdBySyncUid)
+        {
+            if (string.Equals(tombstone.EntityType, SyncTombstoneStore.EntityTypeSheet, StringComparison.OrdinalIgnoreCase))
+            {
+                using var deleteSheet = connection.CreateCommand();
+                deleteSheet.Transaction = transaction;
+                deleteSheet.CommandText = "DELETE FROM sheet_files WHERE sync_uid = $syncUid";
+                deleteSheet.Parameters.AddWithValue("$syncUid", tombstone.SyncUid);
+                await deleteSheet.ExecuteNonQueryAsync().ConfigureAwait(false);
+                return;
+            }
+
+            if (string.Equals(tombstone.EntityType, SyncTombstoneStore.EntityTypePiece, StringComparison.OrdinalIgnoreCase))
+            {
+                using var deletePiece = connection.CreateCommand();
+                deletePiece.Transaction = transaction;
+                deletePiece.CommandText = "DELETE FROM pieces WHERE sync_uid = $syncUid";
+                deletePiece.Parameters.AddWithValue("$syncUid", tombstone.SyncUid);
+                await deletePiece.ExecuteNonQueryAsync().ConfigureAwait(false);
+                pieceIdBySyncUid.Remove(tombstone.SyncUid);
+            }
         }
 
         private async Task<long> UpsertPieceAsync(
@@ -255,6 +335,28 @@ WHERE id = $id AND (updated_at IS NULL OR updated_at <= $updatedAt)";
             }
             else
             {
+                var matchedPieceId = await TryFindMatchingPieceIdAsync(connection, transaction, dto).ConfigureAwait(false);
+                if (matchedPieceId.HasValue)
+                {
+                    pieceId = matchedPieceId.Value;
+                    using var update = connection.CreateCommand();
+                    update.Transaction = transaction;
+                    update.CommandText = @"
+UPDATE pieces SET
+ sync_uid = $syncUid,
+ title = $title, composer = $composer, arranger = $arranger, publisher = $publisher,
+ isbn = $isbn, tags = $tags, genre = $genre, cabinet = $cabinet, compartment = $compartment,
+ slot = $slot, is_active = $isActive, folder_path = $folderPath, updated_at = $updatedAt
+WHERE id = $id AND (updated_at IS NULL OR updated_at <= $updatedAt OR sync_uid IS NULL OR sync_uid = '' OR sync_uid = $syncUid)";
+                    BindPieceSync(update, dto);
+                    update.Parameters.AddWithValue("$syncUid", dto.SyncUid);
+                    update.Parameters.AddWithValue("$id", pieceId);
+                    var rowsAffected = await update.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    applyInstrumentSync = rowsAffected > 0;
+                    pieceIdBySyncUid[dto.SyncUid] = pieceId;
+                }
+                else
+                {
                 using var insert = connection.CreateCommand();
                 insert.Transaction = transaction;
                 insert.CommandText = @"
@@ -269,6 +371,7 @@ SELECT last_insert_rowid();";
                 insert.Parameters.AddWithValue("$syncUid", dto.SyncUid);
                 pieceId = (long)(await insert.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);
                 pieceIdBySyncUid[dto.SyncUid] = pieceId;
+                }
             }
 
             if (!applyInstrumentSync)
@@ -329,8 +432,15 @@ SELECT last_insert_rowid();";
                 if (await reader.ReadAsync().ConfigureAwait(false))
                 {
                     existingId = reader.GetInt64(0);
-                    existingUpdatedAt = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    existingUpdatedAt = reader.IsDBNull(1) ? null : reader.GetString(1);
                 }
+            }
+
+            if (!existingId.HasValue)
+            {
+                existingId = await TryFindMatchingSheetIdAsync(connection, transaction, pieceId, dto.FileName)
+                    .ConfigureAwait(false);
+                existingUpdatedAt = null;
             }
 
             if (existingId.HasValue
@@ -346,11 +456,13 @@ SELECT last_insert_rowid();";
                 update.Transaction = transaction;
                 update.CommandText = @"
 UPDATE sheet_files SET
+ sync_uid = $syncUid,
  piece_id = $pieceId, file_name = $fileName, stored_path = '', instrument_id = $instrumentId,
  instrument_group_id = $instrumentGroupId, sort_order = $sortOrder, file_data = $fileData,
  content_type = $contentType, content_hash = $contentHash, updated_at = $updatedAt, uploaded_at = $uploadedAt
-WHERE id = $id AND (updated_at IS NULL OR updated_at <= $updatedAt)";
+WHERE id = $id AND (updated_at IS NULL OR updated_at <= $updatedAt OR sync_uid IS NULL OR sync_uid = '' OR sync_uid = $syncUid)";
                 update.Parameters.AddWithValue("$id", existingId.Value);
+                update.Parameters.AddWithValue("$syncUid", dto.SyncUid);
                 BindSheetSync(update, pieceId, dto, bytes, instrumentId);
                 await update.ExecuteNonQueryAsync().ConfigureAwait(false);
                 return;
@@ -438,6 +550,70 @@ ORDER BY i.name";
         private static string? ReadNullableString(SqliteDataReader reader, int ordinal)
         {
             return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+        }
+
+        private static async Task<long?> TryFindMatchingPieceIdAsync(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            PieceSyncDto dto)
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"
+SELECT id
+FROM pieces
+WHERE lower(trim(title)) = lower(trim($title))
+  AND coalesce(composer, '') = coalesce($composer, '')
+  AND coalesce(arranger, '') = coalesce($arranger, '')
+  AND coalesce(cabinet, '') = coalesce($cabinet, '')
+  AND coalesce(compartment, '') = coalesce($compartment, '')
+  AND coalesce(slot, '') = coalesce($slot, '')
+  AND (sync_uid IS NULL OR sync_uid = '' OR sync_uid = $syncUid)
+ORDER BY id
+LIMIT 1";
+            command.Parameters.AddWithValue("$title", dto.Title);
+            command.Parameters.AddWithValue("$composer", dto.Composer ?? string.Empty);
+            command.Parameters.AddWithValue("$arranger", dto.Arranger ?? string.Empty);
+            command.Parameters.AddWithValue("$cabinet", dto.Cabinet ?? string.Empty);
+            command.Parameters.AddWithValue("$compartment", dto.Compartment ?? string.Empty);
+            command.Parameters.AddWithValue("$slot", dto.Slot ?? string.Empty);
+            command.Parameters.AddWithValue("$syncUid", dto.SyncUid);
+
+            var value = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return value == null ? null : Convert.ToInt64(value);
+        }
+
+        private static async Task<long?> TryFindMatchingSheetIdAsync(
+            SqliteConnection connection,
+            SqliteTransaction transaction,
+            long pieceId,
+            string fileName)
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"
+SELECT id
+FROM sheet_files
+WHERE piece_id = $pieceId
+  AND lower(file_name) = lower($fileName)
+ORDER BY id
+LIMIT 1";
+            command.Parameters.AddWithValue("$pieceId", pieceId);
+            command.Parameters.AddWithValue("$fileName", fileName);
+
+            var value = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return value == null ? null : Convert.ToInt64(value);
+        }
+
+        private static async Task<int> CountSheetFilesAsync(SqliteConnection connection)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+SELECT COUNT(*)
+FROM sheet_files sf
+WHERE sf.file_data IS NOT NULL AND length(sf.file_data) > 0";
+            var value = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return value == null ? 0 : Convert.ToInt32(value);
         }
     }
 }

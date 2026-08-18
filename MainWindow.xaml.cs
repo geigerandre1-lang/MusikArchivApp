@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -26,6 +27,9 @@ namespace MusikArchivApp
         private readonly SyncService syncService;
         private readonly SyncRepository syncRepository;
         private SyncConfig syncConfig = new();
+        private CancellationTokenSource? syncCancellation;
+        private SyncOperation activeSyncOperation = SyncOperation.None;
+        private DateTime lastSyncProgressUiUpdate = DateTime.MinValue;
         private Piece currentPiece = new Piece();
         private bool isAdminLoggedIn;
         private const string AdminPassword = "Admin17";
@@ -456,6 +460,7 @@ namespace MusikArchivApp
 
             DataContext = this;
             InitializeComponent();
+            WindowIcons.Apply(this);
 
             // Gespeicherte Spalten-Konfiguration anwenden
             ApplyColumnConfig(LoadColumnConfig());
@@ -1117,6 +1122,25 @@ namespace MusikArchivApp
             if (AdminPasswordBox != null)
             {
                 AdminPasswordBox.Password = string.Empty;
+            }
+        }
+
+        private async void DuplicateCleanupButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (!IsAdminLoggedIn)
+            {
+                return;
+            }
+
+            var dialog = new DuplicateCleanupDialog(DatabaseInitializer.GetConnectionString())
+            {
+                Owner = this
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                await LoadPiecesAsync().ConfigureAwait(true);
+                RefreshSyncStatusUi();
             }
         }
 
@@ -2706,46 +2730,236 @@ namespace MusikArchivApp
             await SyncConfigStore.SaveAsync(syncConfig).ConfigureAwait(true);
             RefreshSyncStatusUi();
             UpdateAdminCredentialsDisplay();
-            SyncStatusText.Text = "Konfiguration gespeichert.";
+            SetSyncActivityMessage("Konfiguration gespeichert.");
+            if (SyncStatusText != null)
+            {
+                SyncStatusText.Text = "Konfiguration gespeichert.";
+            }
         }
 
         private async void SyncTestConnection_Click(object sender, RoutedEventArgs e)
         {
-            ReadSyncConfigFromUi();
-            SyncStatusText.Text = "Teste Verbindung …";
-            var (ok, message) = await syncService.TestConnectionAsync(syncConfig).ConfigureAwait(true);
-            SyncStatusText.Text = message;
-            if (!ok)
+            if (!TryBeginSyncOperation(SyncOperation.Testing, "Verbindung wird getestet …"))
             {
-                UiMessage.Show(message, "Synchronisation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            ReadSyncConfigFromUi();
+            try
+            {
+                var (ok, message) = await syncService.TestConnectionAsync(syncConfig, syncCancellation!.Token).ConfigureAwait(true);
+                SetSyncActivityMessage(message);
+                if (SyncStatusText != null)
+                {
+                    SyncStatusText.Text = message;
+                }
+
+                if (!ok)
+                {
+                    UiMessage.Show(message, "Synchronisation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                SetSyncActivityMessage("Verbindungstest abgebrochen.");
+            }
+            finally
+            {
+                EndSyncOperation();
             }
         }
 
         private async void SyncPush_Click(object sender, RoutedEventArgs e)
         {
+            if (!TryBeginSyncOperation(SyncOperation.Uploading, "Upload läuft …"))
+            {
+                return;
+            }
+
             ReadSyncConfigFromUi();
-            SyncStatusText.Text = "Upload läuft …";
-            var (ok, message) = await syncService.PushAsync(syncConfig).ConfigureAwait(true);
-            RefreshSyncStatusUi();
-            SyncStatusText.Text = message;
-            UiMessage.Show(message, ok ? "Synchronisation" : "Fehler",
-                MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
+            try
+            {
+                var progress = CreateSyncProgressReporter();
+                var (ok, message) = await syncService.PushAsync(syncConfig, syncCancellation!.Token, progress).ConfigureAwait(true);
+                RefreshSyncStatusUi();
+                SetSyncActivityMessage(message);
+                if (SyncStatusText != null)
+                {
+                    SyncStatusText.Text = message;
+                }
+
+                UiMessage.Show(message, ok ? "Synchronisation" : "Fehler",
+                    MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
+            }
+            catch (OperationCanceledException)
+            {
+                SetSyncActivityMessage("Upload abgebrochen.");
+                UiMessage.Show("Upload abgebrochen.", "Synchronisation", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            finally
+            {
+                EndSyncOperation();
+            }
         }
 
         private async void SyncPull_Click(object sender, RoutedEventArgs e)
         {
-            ReadSyncConfigFromUi();
-            SyncStatusText.Text = "Download läuft …";
-            var (ok, message) = await syncService.PullAsync(syncConfig).ConfigureAwait(true);
-            RefreshSyncStatusUi();
-            SyncStatusText.Text = message;
-            if (ok)
+            if (!TryBeginSyncOperation(SyncOperation.Downloading, "Download läuft …"))
             {
-                await LoadPiecesAsync().ConfigureAwait(true);
+                return;
             }
 
-            UiMessage.Show(message, ok ? "Synchronisation" : "Fehler",
-                MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
+            ReadSyncConfigFromUi();
+            try
+            {
+                var progress = CreateSyncProgressReporter();
+                var (ok, message) = await syncService.PullAsync(syncConfig, syncCancellation!.Token, progress).ConfigureAwait(true);
+                RefreshSyncStatusUi();
+                SetSyncActivityMessage(message);
+                if (SyncStatusText != null)
+                {
+                    SyncStatusText.Text = message;
+                }
+
+                if (ok)
+                {
+                    await LoadPiecesAsync().ConfigureAwait(true);
+                }
+
+                UiMessage.Show(message, ok ? "Synchronisation" : "Fehler",
+                    MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
+            }
+            catch (OperationCanceledException)
+            {
+                SetSyncActivityMessage("Download abgebrochen.");
+                UiMessage.Show("Download abgebrochen.", "Synchronisation", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            finally
+            {
+                EndSyncOperation();
+            }
+        }
+
+        private void SyncStopUpload_Click(object sender, RoutedEventArgs e)
+        {
+            if (activeSyncOperation != SyncOperation.Uploading)
+            {
+                return;
+            }
+
+            SetSyncActivityMessage("Upload wird abgebrochen …");
+            syncCancellation?.Cancel();
+        }
+
+        private bool TryBeginSyncOperation(SyncOperation operation, string activityMessage)
+        {
+            if (activeSyncOperation != SyncOperation.None)
+            {
+                UiMessage.Show(
+                    $"Es läuft bereits ein Sync-Vorgang ({DescribeSyncOperation(activeSyncOperation)}).",
+                    "Synchronisation",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return false;
+            }
+
+            activeSyncOperation = operation;
+            syncCancellation = new CancellationTokenSource();
+            lastSyncProgressUiUpdate = DateTime.MinValue;
+            SetSyncActivityMessage(activityMessage);
+            UpdateSyncButtonsUi();
+            ShowSyncProgressBar(operation is SyncOperation.Uploading or SyncOperation.Downloading);
+            return true;
+        }
+
+        private void EndSyncOperation()
+        {
+            activeSyncOperation = SyncOperation.None;
+            syncCancellation?.Dispose();
+            syncCancellation = null;
+            UpdateSyncButtonsUi();
+            ShowSyncProgressBar(false);
+        }
+
+        private IProgress<SyncProgressReport> CreateSyncProgressReporter()
+        {
+            return new Progress<SyncProgressReport>(report => UpdateSyncProgressUi(report));
+        }
+
+        private void UpdateSyncProgressUi(SyncProgressReport report)
+        {
+            var now = DateTime.UtcNow;
+            if (report.PercentComplete < 100
+                && (now - lastSyncProgressUiUpdate).TotalMilliseconds < 120)
+            {
+                return;
+            }
+
+            lastSyncProgressUiUpdate = now;
+            SetSyncActivityMessage(SyncProgressFormatter.FormatProgressLine(report));
+            if (SyncProgressBar != null)
+            {
+                SyncProgressBar.Value = report.PercentComplete;
+            }
+        }
+
+        private void ShowSyncProgressBar(bool visible)
+        {
+            if (SyncProgressBar == null)
+            {
+                return;
+            }
+
+            SyncProgressBar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            if (!visible)
+            {
+                SyncProgressBar.Value = 0;
+            }
+        }
+
+        private void SetSyncActivityMessage(string message)
+        {
+            if (SyncActivityText != null)
+            {
+                SyncActivityText.Text = message;
+            }
+        }
+
+        private void UpdateSyncButtonsUi()
+        {
+            var busy = activeSyncOperation != SyncOperation.None;
+            if (SyncPushButton != null)
+            {
+                SyncPushButton.IsEnabled = !busy;
+            }
+
+            if (SyncPullButton != null)
+            {
+                SyncPullButton.IsEnabled = !busy;
+            }
+
+            if (SyncStopUploadButton != null)
+            {
+                SyncStopUploadButton.Visibility = activeSyncOperation == SyncOperation.Uploading
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }
+
+        private static string DescribeSyncOperation(SyncOperation operation) => operation switch
+        {
+            SyncOperation.Testing => "Verbindungstest",
+            SyncOperation.Uploading => "Upload",
+            SyncOperation.Downloading => "Download",
+            _ => "Sync"
+        };
+
+        private enum SyncOperation
+        {
+            None,
+            Testing,
+            Uploading,
+            Downloading
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

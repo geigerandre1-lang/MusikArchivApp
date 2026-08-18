@@ -1,0 +1,85 @@
+<Window x:Class="MusikArchivApp.DuplicateCleanupDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Duplikate bereinigen"
+        Width="920"
+        Height="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="Findet doppelte Musikstücke (gleicher Titel/Ort) und doppelte Notendateien (gleicher Dateiname pro Stück). Pro Gruppe wird ein Eintrag behalten, die übrigen werden gelöscht."
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,10"/>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock x:Name="SummaryText" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,12,0"/>
+            <Button Content="Erneut suchen" Width="110" Click="RefreshButton_Click"/>
+        </StackPanel>
+
+        <TabControl Grid.Row="2">
+            <TabItem Header="Musikstücke">
+                <DataGrid x:Name="PieceGroupsGrid"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          SelectionMode="Single"
+                          IsReadOnly="False"
+                          Margin="0,8,0,0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Duplikatgruppe" Binding="{Binding Summary}" Width="*" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Anzahl" Binding="{Binding Count}" Width="70" IsReadOnly="True"/>
+                        <DataGridTemplateColumn Header="Behalten" Width="2*">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <ComboBox ItemsSource="{Binding Entries}"
+                                              DisplayMemberPath="DisplayText"
+                                              SelectedValuePath="Id"
+                                              SelectedValue="{Binding SelectedKeepId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+            <TabItem Header="Notenblätter">
+                <DataGrid x:Name="SheetGroupsGrid"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          SelectionMode="Single"
+                          IsReadOnly="False"
+                          Margin="0,8,0,0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Duplikatgruppe" Binding="{Binding Summary}" Width="*" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Anzahl" Binding="{Binding Count}" Width="70" IsReadOnly="True"/>
+                        <DataGridTemplateColumn Header="Behalten" Width="2*">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <ComboBox ItemsSource="{Binding Entries}"
+                                              DisplayMemberPath="DisplayText"
+                                              SelectedValuePath="Id"
+                                              SelectedValue="{Binding SelectedKeepId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="CleanupPiecesButton" Content="Stück-Duplikate bereinigen" Width="170" Margin="0,0,8,0" Click="CleanupPiecesButton_Click"/>
+            <Button x:Name="CleanupSheetsButton" Content="Noten-Duplikate bereinigen" Width="170" Margin="0,0,8,0" Click="CleanupSheetsButton_Click"/>
+            <Button x:Name="CleanupAllButton" Content="Alles bereinigen" Width="120" Margin="0,0,8,0" Click="CleanupAllButton_Click"/>
+            <Button Content="Schließen" Width="90" IsCancel="True" Click="CloseButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

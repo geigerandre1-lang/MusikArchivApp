@@ -32,6 +32,7 @@ namespace MusikArchivApp
             this.host = host;
             workingPiece = ClonePiece(host.Piece);
             InitializeComponent();
+            WindowIcons.Apply(this);
             DataContext = workingPiece;
 
             RefreshBesetzungView();

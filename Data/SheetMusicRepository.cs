@@ -188,6 +188,8 @@ WHERE id = $id";
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
 
+            await SyncTombstoneStore.RecordSheetDeletionAsync(file.Id).ConfigureAwait(false);
+
             using var command = connection.CreateCommand();
             command.CommandText = "DELETE FROM sheet_files WHERE id = $id";
             command.Parameters.AddWithValue("$id", file.Id);

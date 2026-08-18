@@ -9,6 +9,7 @@ namespace MusikArchivApp.Models
         public string? WebViewPassword { get; set; }
         public List<PieceSyncDto> Pieces { get; set; } = new();
         public List<SheetSyncDto> Sheets { get; set; } = new();
+        public List<SyncTombstoneDto> Tombstones { get; set; } = new();
     }
 
     public class SyncPullResponse
@@ -16,6 +17,14 @@ namespace MusikArchivApp.Models
         public DateTime ServerTime { get; set; }
         public List<PieceSyncDto> Pieces { get; set; } = new();
         public List<SheetSyncDto> Sheets { get; set; } = new();
+        public List<SyncTombstoneDto> Tombstones { get; set; } = new();
+    }
+
+    public class SyncTombstoneDto
+    {
+        public string SyncUid { get; set; } = string.Empty;
+        public string EntityType { get; set; } = string.Empty;
+        public DateTime DeletedAt { get; set; }
     }
 
     public class SyncHealthResponse

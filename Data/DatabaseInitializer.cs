@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS instrument_group_assignments (
             EnsureSheetFilesTable(connection);
             EnsureSheetFilesBlobColumns(connection);
             EnsureSyncColumns(connection);
+            SyncTombstoneStore.EnsureTable(connection);
             EnsureInstrumentsSeeded(connection);
             EnsureTagAndGenreOptionsSeeded(connection);
             EnsureCabinetCompartmentSlotOptionsSeeded(connection);

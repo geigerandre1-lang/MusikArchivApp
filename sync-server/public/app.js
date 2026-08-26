@@ -7,6 +7,7 @@ const state = {
   selectedPieceUid: null,
   selectedSheet: null,
   selectedSheetUid: null,
+  loadingPieceUid: null,
   previewObjectUrl: null
 };
 
@@ -25,6 +26,7 @@ const els = {
   activeOnlyFilter: document.getElementById('activeOnlyFilter'),
   pieceCount: document.getElementById('pieceCount'),
   pieceList: document.getElementById('pieceList'),
+  backToListButton: document.getElementById('backToListButton'),
   emptyState: document.getElementById('emptyState'),
   detailView: document.getElementById('detailView'),
   detailTitle: document.getElementById('detailTitle'),
@@ -106,6 +108,7 @@ function showApp() {
 function logout() {
   state.token = null;
   sessionStorage.removeItem(TOKEN_KEY);
+  setDetailOpen(false);
   showLogin();
 }
 
@@ -133,6 +136,24 @@ function debounce(fn, delay) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   };
+}
+
+const compactLayoutQuery = window.matchMedia('(orientation: portrait), (max-width: 800px)');
+
+function isCompactLayout() {
+  return compactLayoutQuery.matches;
+}
+
+function setDetailOpen(open) {
+  document.body.classList.toggle('detail-open', Boolean(open));
+}
+
+function closePieceDetail() {
+  if (parseHashRoute()) {
+    window.location.hash = '';
+    return;
+  }
+  setDetailOpen(false);
 }
 
 function buildQuery() {
@@ -191,23 +212,55 @@ function renderPieceList() {
       <div class="piece-title">${escapeHtml(piece.title)}</div>
       <div class="piece-sub">${escapeHtml(piece.composer || 'Unbekannter Komponist')} · ${piece.sheetCount} Noten</div>
     `;
-    button.addEventListener('click', () => selectPiece(piece.syncUid));
+    button.addEventListener('click', () => selectPiece(piece.syncUid, { focusDetail: isCompactLayout() }));
+    button.addEventListener('dblclick', (event) => {
+      event.preventDefault();
+      selectPiece(piece.syncUid, { focusDetail: true });
+    });
     li.appendChild(button);
     els.pieceList.appendChild(li);
   }
 }
 
-async function selectPiece(syncUid) {
+async function selectPiece(syncUid, { focusDetail = false } = {}) {
+  const alreadyLoaded = state.selectedPieceUid === syncUid && state.selectedPiece?.syncUid === syncUid;
+  const alreadyLoading = state.loadingPieceUid === syncUid;
   state.selectedPieceUid = syncUid;
-  state.selectedSheetUid = null;
-  state.selectedSheet = null;
-  clearPreview();
-  renderPieceList();
-  window.location.hash = `#/piece/${syncUid}`;
+  setDetailOpen(true);
 
-  const data = await api(`/api/pieces/${encodeURIComponent(syncUid)}`);
-  state.selectedPiece = data.piece;
-  renderPieceDetail(data.piece, data.sheets);
+  if (alreadyLoaded || alreadyLoading) {
+    if (parseHashRoute() !== syncUid) {
+      window.location.hash = `#/piece/${syncUid}`;
+    }
+  } else {
+    state.loadingPieceUid = syncUid;
+    state.selectedSheetUid = null;
+    state.selectedSheet = null;
+    clearPreview();
+    renderPieceList();
+    els.emptyState.classList.add('hidden');
+    els.detailView.classList.remove('hidden');
+    if (!state.selectedPiece || state.selectedPiece.syncUid !== syncUid) {
+      els.detailTitle.textContent = 'Laden …';
+    }
+    window.location.hash = `#/piece/${syncUid}`;
+
+    try {
+      const data = await api(`/api/pieces/${encodeURIComponent(syncUid)}`);
+      if (state.selectedPieceUid !== syncUid) return;
+      state.selectedPiece = data.piece;
+      renderPieceDetail(data.piece, data.sheets);
+    } finally {
+      if (state.loadingPieceUid === syncUid) {
+        state.loadingPieceUid = null;
+      }
+    }
+  }
+
+  if (focusDetail) {
+    els.detailView.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    els.detailView.focus({ preventScroll: true });
+  }
 }
 
 function renderPieceDetail(piece, sheets) {
@@ -420,6 +473,7 @@ els.loginForm.addEventListener('submit', async (event) => {
 });
 
 els.logoutButton.addEventListener('click', logout);
+els.backToListButton.addEventListener('click', closePieceDetail);
 els.printPieceButton.addEventListener('click', printPieceInfo);
 els.printSheetButton.addEventListener('click', printSheetPreview);
 
@@ -438,8 +492,20 @@ els.activeOnlyFilter.addEventListener('change', () => loadPieces());
 
 window.addEventListener('hashchange', async () => {
   const routePiece = parseHashRoute();
-  if (routePiece && routePiece !== state.selectedPieceUid) {
+  if (!routePiece) {
+    setDetailOpen(false);
+    return;
+  }
+  if (routePiece !== state.selectedPieceUid) {
     await selectPiece(routePiece);
+  } else {
+    setDetailOpen(true);
+  }
+});
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && document.body.classList.contains('detail-open') && isCompactLayout()) {
+    closePieceDetail();
   }
 });
 

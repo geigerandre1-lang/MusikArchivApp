@@ -24,6 +24,9 @@
   <div id="appRoot" class="hidden">
     <header class="topbar">
       <div class="brand">
+        <button id="backToListButton" type="button" class="secondary-button back-to-list-button" aria-label="Zurück zur Stückliste">
+          Zurück zur Liste
+        </button>
         <img src="/favicon.png" alt="" width="28" height="28" class="brand-icon">
         <h1>Musikarchiv</h1>
         <span id="statusBadge" class="badge">Angemeldet</span>
@@ -50,15 +53,17 @@
           <h2>Stücke</h2>
           <span id="pieceCount" class="muted">0</span>
         </div>
+        <p class="list-open-hint">Tippe auf ein Stück, um die Details zu öffnen.</p>
         <ul id="pieceList" class="piece-list"></ul>
       </aside>
 
       <section class="detail-panel">
         <div id="emptyState" class="empty-state">
-          <p>Wähle ein Stück aus der Liste.</p>
+          <p class="empty-hint-wide">Wähle ein Stück aus der Liste. Doppelklick fokussiert die Details.</p>
+          <p class="empty-hint-compact">Tippe auf ein Stück, um die Details zu öffnen.</p>
         </div>
 
-        <div id="detailView" class="detail-view hidden">
+        <div id="detailView" class="detail-view hidden" tabindex="-1">
           <div class="detail-header">
             <div>
               <h2 id="detailTitle"></h2>

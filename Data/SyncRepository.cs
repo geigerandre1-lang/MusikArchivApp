@@ -21,9 +21,14 @@ namespace MusikArchivApp.Data
         {
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
+            await EnsureSyncUidsAsync(connection).ConfigureAwait(false);
+        }
 
+        public static async Task EnsureSyncUidsAsync(SqliteConnection connection, SqliteTransaction? transaction = null)
+        {
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
                 command.CommandText = @"
 UPDATE pieces
 SET sync_uid = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
@@ -36,6 +41,7 @@ WHERE sync_uid IS NULL OR sync_uid = ''";
 
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
                 command.CommandText = @"
 UPDATE sheet_files
 SET sync_uid = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||

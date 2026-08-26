@@ -11,9 +11,10 @@ namespace MusikArchivApp.Data
         public const string EntityTypePiece = "piece";
         public const string EntityTypeSheet = "sheet";
 
-        public static void EnsureTable(SqliteConnection connection)
+        public static void EnsureTable(SqliteConnection connection, SqliteTransaction? transaction = null)
         {
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = @"
 CREATE TABLE IF NOT EXISTS sync_tombstones (
     sync_uid TEXT PRIMARY KEY,
@@ -33,9 +34,25 @@ CREATE TABLE IF NOT EXISTS sync_tombstones (
             var connectionString = DatabaseInitializer.GetConnectionString();
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
-            EnsureTable(connection);
+            await RecordDeletionAsync(connection, null, syncUid, entityType, deletedAt).ConfigureAwait(false);
+        }
+
+        public static async Task RecordDeletionAsync(
+            SqliteConnection connection,
+            SqliteTransaction? transaction,
+            string syncUid,
+            string entityType,
+            DateTime? deletedAt = null)
+        {
+            if (string.IsNullOrWhiteSpace(syncUid))
+            {
+                return;
+            }
+
+            EnsureTable(connection, transaction);
 
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = @"
 INSERT INTO sync_tombstones (sync_uid, entity_type, deleted_at)
 VALUES ($syncUid, $entityType, $deletedAt)
@@ -53,16 +70,23 @@ ON CONFLICT(sync_uid) DO UPDATE SET
             var connectionString = DatabaseInitializer.GetConnectionString();
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
-            EnsureTable(connection);
+            await RecordPieceDeletionAsync(connection, null, pieceId).ConfigureAwait(false);
+        }
 
-            var syncRepository = new SyncRepository(connectionString);
-            await syncRepository.EnsureSyncUidsAsync().ConfigureAwait(false);
+        public static async Task RecordPieceDeletionAsync(
+            SqliteConnection connection,
+            SqliteTransaction? transaction,
+            long pieceId)
+        {
+            EnsureTable(connection, transaction);
+            await SyncRepository.EnsureSyncUidsAsync(connection, transaction).ConfigureAwait(false);
 
             string? pieceSyncUid = null;
             var sheetSyncUids = new List<string>();
 
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
                 command.CommandText = "SELECT sync_uid FROM pieces WHERE id = $id";
                 command.Parameters.AddWithValue("$id", pieceId);
                 pieceSyncUid = await command.ExecuteScalarAsync().ConfigureAwait(false) as string;
@@ -70,6 +94,7 @@ ON CONFLICT(sync_uid) DO UPDATE SET
 
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
                 command.CommandText = "SELECT sync_uid FROM sheet_files WHERE piece_id = $pieceId AND sync_uid IS NOT NULL AND sync_uid != ''";
                 command.Parameters.AddWithValue("$pieceId", pieceId);
                 using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -82,12 +107,14 @@ ON CONFLICT(sync_uid) DO UPDATE SET
             var deletedAt = DateTime.UtcNow;
             foreach (var sheetSyncUid in sheetSyncUids)
             {
-                await RecordDeletionAsync(sheetSyncUid, EntityTypeSheet, deletedAt).ConfigureAwait(false);
+                await RecordDeletionAsync(connection, transaction, sheetSyncUid, EntityTypeSheet, deletedAt)
+                    .ConfigureAwait(false);
             }
 
             if (!string.IsNullOrWhiteSpace(pieceSyncUid))
             {
-                await RecordDeletionAsync(pieceSyncUid, EntityTypePiece, deletedAt).ConfigureAwait(false);
+                await RecordDeletionAsync(connection, transaction, pieceSyncUid, EntityTypePiece, deletedAt)
+                    .ConfigureAwait(false);
             }
         }
 
@@ -96,17 +123,24 @@ ON CONFLICT(sync_uid) DO UPDATE SET
             var connectionString = DatabaseInitializer.GetConnectionString();
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
+            await RecordSheetDeletionAsync(connection, null, sheetFileId).ConfigureAwait(false);
+        }
 
-            var syncRepository = new SyncRepository(connectionString);
-            await syncRepository.EnsureSyncUidsAsync().ConfigureAwait(false);
+        public static async Task RecordSheetDeletionAsync(
+            SqliteConnection connection,
+            SqliteTransaction? transaction,
+            long sheetFileId)
+        {
+            await SyncRepository.EnsureSyncUidsAsync(connection, transaction).ConfigureAwait(false);
 
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = "SELECT sync_uid FROM sheet_files WHERE id = $id";
             command.Parameters.AddWithValue("$id", sheetFileId);
             var syncUid = await command.ExecuteScalarAsync().ConfigureAwait(false) as string;
             if (!string.IsNullOrWhiteSpace(syncUid))
             {
-                await RecordDeletionAsync(syncUid, EntityTypeSheet).ConfigureAwait(false);
+                await RecordDeletionAsync(connection, transaction, syncUid, EntityTypeSheet).ConfigureAwait(false);
             }
         }
 
@@ -115,20 +149,26 @@ ON CONFLICT(sync_uid) DO UPDATE SET
             var connectionString = DatabaseInitializer.GetConnectionString();
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync().ConfigureAwait(false);
+            await SyncRepository.EnsureSyncUidsAsync(connection).ConfigureAwait(false);
 
-            var syncRepository = new SyncRepository(connectionString);
-            await syncRepository.EnsureSyncUidsAsync().ConfigureAwait(false);
-
-            using var command = connection.CreateCommand();
-            command.CommandText = @"
+            var tombstones = new List<(string SyncUid, string EntityType)>();
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
 SELECT sync_uid, 'piece' AS entity_type FROM pieces WHERE sync_uid IS NOT NULL AND sync_uid != ''
 UNION ALL
 SELECT sync_uid, 'sheet' AS entity_type FROM sheet_files WHERE sync_uid IS NOT NULL AND sync_uid != ''";
-            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    tombstones.Add((reader.GetString(0), reader.GetString(1)));
+                }
+            }
+
             var deletedAt = DateTime.UtcNow;
-            while (await reader.ReadAsync().ConfigureAwait(false))
+            foreach (var (syncUid, entityType) in tombstones)
             {
-                await RecordDeletionAsync(reader.GetString(0), reader.GetString(1), deletedAt).ConfigureAwait(false);
+                await RecordDeletionAsync(connection, null, syncUid, entityType, deletedAt).ConfigureAwait(false);
             }
         }
 

@@ -29,6 +29,12 @@ namespace MusikArchivApp.Data
             using var connection = new SqliteConnection(connectionString);
             connection.Open();
 
+            using (var pragma = connection.CreateCommand())
+            {
+                pragma.CommandText = "PRAGMA journal_mode=WAL;";
+                pragma.ExecuteNonQuery();
+            }
+
                     using (var command = connection.CreateCommand())
                     {
                     command.CommandText = @"

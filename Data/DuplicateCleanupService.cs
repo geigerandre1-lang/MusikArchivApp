@@ -134,7 +134,8 @@ ORDER BY lower(p.title), lower(sf.file_name), sf.id";
                 result.MergedSheets += await MoveSheetsToKeeperAsync(connection, transaction, keepId, removeId)
                     .ConfigureAwait(false);
                 await MergeInstrumentsAsync(connection, transaction, keepId, removeId).ConfigureAwait(false);
-                await SyncTombstoneStore.RecordPieceDeletionAsync(removeId).ConfigureAwait(false);
+                await SyncTombstoneStore.RecordPieceDeletionAsync(connection, transaction, removeId)
+                    .ConfigureAwait(false);
 
                 using var deletePiece = connection.CreateCommand();
                 deletePiece.Transaction = transaction;
@@ -164,7 +165,8 @@ ORDER BY lower(p.title), lower(sf.file_name), sf.id";
 
             foreach (var removeId in removeIdList)
             {
-                await SyncTombstoneStore.RecordSheetDeletionAsync(removeId).ConfigureAwait(false);
+                await SyncTombstoneStore.RecordSheetDeletionAsync(connection, transaction, removeId)
+                    .ConfigureAwait(false);
 
                 using var deleteSheet = connection.CreateCommand();
                 deleteSheet.Transaction = transaction;
@@ -200,15 +202,14 @@ ORDER BY lower(p.title), lower(sf.file_name), sf.id";
                 }
             }
 
+            var toMove = new List<(long Id, string FileName)>();
+            var toDelete = new List<long>();
             using (var command = connection.CreateCommand())
             {
                 command.Transaction = transaction;
                 command.CommandText = "SELECT id, lower(file_name) FROM sheet_files WHERE piece_id = $pieceId";
                 command.Parameters.AddWithValue("$pieceId", removeId);
                 using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-                var toMove = new List<(long Id, string FileName)>();
-                var toDelete = new List<long>();
-
                 while (await reader.ReadAsync().ConfigureAwait(false))
                 {
                     var sheetId = reader.GetInt64(0);
@@ -222,28 +223,29 @@ ORDER BY lower(p.title), lower(sf.file_name), sf.id";
                         toMove.Add((sheetId, fileName));
                     }
                 }
+            }
 
-                foreach (var sheetId in toDelete)
-                {
-                    await SyncTombstoneStore.RecordSheetDeletionAsync(sheetId).ConfigureAwait(false);
-                    using var deleteSheet = connection.CreateCommand();
-                    deleteSheet.Transaction = transaction;
-                    deleteSheet.CommandText = "DELETE FROM sheet_files WHERE id = $id";
-                    deleteSheet.Parameters.AddWithValue("$id", sheetId);
-                    await deleteSheet.ExecuteNonQueryAsync().ConfigureAwait(false);
-                }
+            foreach (var sheetId in toDelete)
+            {
+                await SyncTombstoneStore.RecordSheetDeletionAsync(connection, transaction, sheetId)
+                    .ConfigureAwait(false);
+                using var deleteSheet = connection.CreateCommand();
+                deleteSheet.Transaction = transaction;
+                deleteSheet.CommandText = "DELETE FROM sheet_files WHERE id = $id";
+                deleteSheet.Parameters.AddWithValue("$id", sheetId);
+                await deleteSheet.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
 
-                foreach (var (sheetId, fileName) in toMove)
-                {
-                    using var updateSheet = connection.CreateCommand();
-                    updateSheet.Transaction = transaction;
-                    updateSheet.CommandText = "UPDATE sheet_files SET piece_id = $keepId WHERE id = $id";
-                    updateSheet.Parameters.AddWithValue("$keepId", keepId);
-                    updateSheet.Parameters.AddWithValue("$id", sheetId);
-                    await updateSheet.ExecuteNonQueryAsync().ConfigureAwait(false);
-                    keeperFileNames.Add(fileName);
-                    moved++;
-                }
+            foreach (var (sheetId, fileName) in toMove)
+            {
+                using var updateSheet = connection.CreateCommand();
+                updateSheet.Transaction = transaction;
+                updateSheet.CommandText = "UPDATE sheet_files SET piece_id = $keepId WHERE id = $id";
+                updateSheet.Parameters.AddWithValue("$keepId", keepId);
+                updateSheet.Parameters.AddWithValue("$id", sheetId);
+                await updateSheet.ExecuteNonQueryAsync().ConfigureAwait(false);
+                keeperFileNames.Add(fileName);
+                moved++;
             }
 
             return moved;

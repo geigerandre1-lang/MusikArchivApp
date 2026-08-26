@@ -75,6 +75,30 @@
             <TextBlock x:Name="SyncWarningText" TextWrapping="Wrap" Foreground="#7A5B00"/>
         </Border>
 
+        <Border x:Name="UpdateBanner"
+                DockPanel.Dock="Top"
+                Background="#E7F6EC"
+                BorderBrush="#2E7D32"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="12,8"
+                Margin="0,0,0,8"
+                Visibility="Collapsed">
+            <DockPanel>
+                <Button x:Name="UpdateBannerButton"
+                        DockPanel.Dock="Right"
+                        Content="Aktualisieren"
+                        Width="120"
+                        Margin="12,0,0,0"
+                        VerticalAlignment="Center"
+                        Click="InstallUpdateButton_Click"/>
+                <TextBlock x:Name="UpdateBannerText"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           Foreground="#1B5E20"/>
+            </DockPanel>
+        </Border>
+
     <TabControl x:Name="MainTabControl">
         <!-- Editor-Reiter -->
         <TabItem Header="Editor">
@@ -681,6 +705,31 @@
                                   SelectedValuePath="Code"
                                   SelectedValue="{Binding AppLanguage}" />
                     </StackPanel>
+
+                    <GroupBox Header="Aktualisierung" Margin="0,0,0,16">
+                        <StackPanel Margin="8">
+                            <TextBlock x:Name="AppVersionText" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="UpdateStatusText" TextWrapping="Wrap" Foreground="#666666" Margin="0,0,0,8"/>
+                            <ProgressBar x:Name="UpdateProgressBar"
+                                         Height="14"
+                                         Minimum="0"
+                                         Maximum="100"
+                                         Visibility="Collapsed"
+                                         Margin="0,0,0,8"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="CheckUpdatesButton"
+                                        Content="Nach Updates suchen"
+                                        Width="160"
+                                        Margin="0,0,8,0"
+                                        Click="CheckUpdatesButton_Click"/>
+                                <Button x:Name="InstallUpdateButton"
+                                        Content="Aktualisieren"
+                                        Width="120"
+                                        IsEnabled="False"
+                                        Click="InstallUpdateButton_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </GroupBox>
 
                     <!-- Export / Import -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">

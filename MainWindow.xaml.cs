@@ -27,6 +27,7 @@ namespace MusikArchivApp
         private readonly SyncService syncService;
         private readonly SyncRepository syncRepository;
         private SyncConfig syncConfig = new();
+        private AppUpdateInfo? pendingAppUpdate;
         private CancellationTokenSource? syncCancellation;
         private SyncOperation activeSyncOperation = SyncOperation.None;
         private DateTime lastSyncProgressUiUpdate = DateTime.MinValue;
@@ -467,11 +468,23 @@ namespace MusikArchivApp
             ApplyFilterColumnConfig(LoadFilterColumnConfig());
             LoadSyncConfigToUi();
             LoadAppConfigToUi();
+            Title = $"Musikarchiv {AppVersion.Current}";
+            if (AppVersionText != null)
+            {
+                AppVersionText.Text = $"Installierte Version: {AppVersion.Current}";
+            }
+
+            if (UpdateStatusText != null)
+            {
+                UpdateStatusText.Text = "Beim Start wird automatisch nach Updates gesucht.";
+            }
+
             MainTabControl.SelectionChanged += (_, _) => RefreshSyncStatusUi();
 
             _ = InitializeTagAndGenreOptionsAsync();
             _ = LoadInstrumentsAsync();
             _ = LoadPiecesAsync();
+            _ = CheckForUpdatesOnStartupAsync();
         }
 
         // Dynamische Instrument-Gruppen (aus DB)
@@ -2642,6 +2655,224 @@ namespace MusikArchivApp
             var config = AppConfigStore.Load();
             config.LabelQrCodeEnabled = LabelQrCodeEnabledCheckBox.IsChecked == true;
             await AppConfigStore.SaveAsync(config).ConfigureAwait(true);
+        }
+
+        private async Task CheckForUpdatesOnStartupAsync()
+        {
+            try
+            {
+                await CheckForUpdatesAsync(silent: true).ConfigureAwait(true);
+            }
+            catch
+            {
+                // Start nicht blockieren, wenn GitHub nicht erreichbar ist.
+            }
+        }
+
+        private async void CheckUpdatesButton_Click(object sender, RoutedEventArgs e)
+        {
+            await CheckForUpdatesAsync(silent: false).ConfigureAwait(true);
+        }
+
+        private async Task CheckForUpdatesAsync(bool silent)
+        {
+            if (UpdateStatusText != null)
+            {
+                UpdateStatusText.Text = "Suche nach Updates …";
+            }
+
+            if (CheckUpdatesButton != null)
+            {
+                CheckUpdatesButton.IsEnabled = false;
+            }
+
+            try
+            {
+                var latest = await AppUpdateService.CheckAsync().ConfigureAwait(true);
+                pendingAppUpdate = latest is { IsNewer: true } ? latest : null;
+                ApplyUpdateUi(latest, error: null);
+                if (!silent && pendingAppUpdate == null)
+                {
+                    UiMessage.Show(
+                        latest == null
+                            ? "Kein veröffentlichtes Update gefunden."
+                            : $"Die App ist aktuell (Version {AppVersion.Current}).",
+                        "Aktualisierung",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                pendingAppUpdate = null;
+                ApplyUpdateUi(null, ex.Message);
+                if (!silent)
+                {
+                    UiMessage.Show($"Update-Prüfung fehlgeschlagen: {ex.Message}", "Aktualisierung", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            finally
+            {
+                if (CheckUpdatesButton != null)
+                {
+                    CheckUpdatesButton.IsEnabled = true;
+                }
+            }
+        }
+
+        private async void InstallUpdateButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (pendingAppUpdate == null || !pendingAppUpdate.IsNewer)
+            {
+                await CheckForUpdatesAsync(silent: false).ConfigureAwait(true);
+                if (pendingAppUpdate == null)
+                {
+                    return;
+                }
+            }
+
+            if (!AppUpdateService.CanApplyInPlace())
+            {
+                UiMessage.Show(
+                    "Die Aktualisierung funktioniert in der portable bzw. installierten App. Aus dem Entwicklungsordner kann sie nicht überschrieben werden.",
+                    "Aktualisierung",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            var update = pendingAppUpdate;
+            var confirm = UiMessage.Confirm(
+                $"Version {update.Version} herunterladen und die App neu starten?",
+                "Aktualisierung",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            if (InstallUpdateButton != null)
+            {
+                InstallUpdateButton.IsEnabled = false;
+            }
+
+            if (UpdateBannerButton != null)
+            {
+                UpdateBannerButton.IsEnabled = false;
+            }
+
+            if (CheckUpdatesButton != null)
+            {
+                CheckUpdatesButton.IsEnabled = false;
+            }
+
+            if (UpdateProgressBar != null)
+            {
+                UpdateProgressBar.Value = 0;
+                UpdateProgressBar.Visibility = Visibility.Visible;
+            }
+
+            var progress = new Progress<(long received, long total)>(tuple =>
+            {
+                if (UpdateProgressBar == null)
+                {
+                    return;
+                }
+
+                if (tuple.total > 0)
+                {
+                    UpdateProgressBar.Value = Math.Min(100, tuple.received * 100d / tuple.total);
+                    UpdateStatusText.Text = $"Lade Update {update.Version} … {tuple.received / (1024 * 1024.0):0.0} / {tuple.total / (1024 * 1024.0):0.0} MB";
+                }
+                else
+                {
+                    UpdateStatusText.Text = $"Lade Update {update.Version} …";
+                }
+            });
+
+            try
+            {
+                await AppUpdateService.DownloadAndApplyAsync(update, progress).ConfigureAwait(true);
+                UpdateStatusText.Text = "Update geladen. Die App wird neu gestartet …";
+                Application.Current.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                ApplyUpdateUi(update, ex.Message);
+                UiMessage.Show($"Update fehlgeschlagen: {ex.Message}", "Aktualisierung", MessageBoxButton.OK, MessageBoxImage.Error);
+                if (CheckUpdatesButton != null)
+                {
+                    CheckUpdatesButton.IsEnabled = true;
+                }
+            }
+        }
+
+        private void ApplyUpdateUi(AppUpdateInfo? latest, string? error)
+        {
+            var hasUpdate = latest is { IsNewer: true };
+            if (InstallUpdateButton != null)
+            {
+                InstallUpdateButton.IsEnabled = hasUpdate;
+            }
+
+            if (UpdateBannerButton != null)
+            {
+                UpdateBannerButton.IsEnabled = hasUpdate;
+            }
+
+            if (UpdateProgressBar != null)
+            {
+                UpdateProgressBar.Visibility = Visibility.Collapsed;
+            }
+
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                if (UpdateStatusText != null)
+                {
+                    UpdateStatusText.Text = error;
+                }
+
+                if (UpdateBanner != null)
+                {
+                    UpdateBanner.Visibility = Visibility.Collapsed;
+                }
+
+                return;
+            }
+
+            if (hasUpdate && latest != null)
+            {
+                var text = $"Neue Version {latest.Version} ist verfügbar (aktuell {AppVersion.Current}).";
+                if (UpdateStatusText != null)
+                {
+                    UpdateStatusText.Text = text;
+                }
+
+                if (UpdateBannerText != null)
+                {
+                    UpdateBannerText.Text = text;
+                }
+
+                if (UpdateBanner != null)
+                {
+                    UpdateBanner.Visibility = Visibility.Visible;
+                }
+            }
+            else
+            {
+                if (UpdateStatusText != null)
+                {
+                    UpdateStatusText.Text = latest == null
+                        ? "Kein veröffentlichtes Update gefunden."
+                        : $"Die App ist aktuell (Version {AppVersion.Current}).";
+                }
+
+                if (UpdateBanner != null)
+                {
+                    UpdateBanner.Visibility = Visibility.Collapsed;
+                }
+            }
         }
 
         private void LoadSyncConfigToUi()

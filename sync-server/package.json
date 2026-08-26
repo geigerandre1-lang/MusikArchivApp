@@ -1,6 +1,6 @@
 {
   "name": "musikarchiv-sync-server",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Sync-API für MusikArchivApp",
   "main": "app.js",

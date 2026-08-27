@@ -2,6 +2,7 @@ const TOKEN_KEY = 'musikarchiv_web_token';
 
 const state = {
   token: sessionStorage.getItem(TOKEN_KEY),
+  allPieces: [],
   pieces: [],
   selectedPiece: null,
   selectedPieceUid: null,
@@ -15,6 +16,12 @@ const els = {
   loginError: document.getElementById('loginError'),
   appRoot: document.getElementById('appRoot'),
   logoutButton: document.getElementById('logoutButton'),
+  wipeButton: document.getElementById('wipeButton'),
+  wipeDialog: document.getElementById('wipeDialog'),
+  wipeForm: document.getElementById('wipeForm'),
+  wipeConfirmInput: document.getElementById('wipeConfirmInput'),
+  wipeCancelButton: document.getElementById('wipeCancelButton'),
+  wipeError: document.getElementById('wipeError'),
   statusBadge: document.getElementById('statusBadge'),
   searchInput: document.getElementById('searchInput'),
   genreFilter: document.getElementById('genreFilter'),
@@ -37,18 +44,28 @@ const els = {
   sheetList: document.getElementById('sheetList')
 };
 
+function showStatus(message, isError = false) {
+  els.statusBadge.textContent = message;
+  els.statusBadge.className = isError ? 'badge error' : 'badge ok';
+}
+
 function authHeaders() {
   return state.token ? { Authorization: `Bearer ${state.token}` } : {};
 }
 
 async function api(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const headers = {
+    ...authHeaders(),
+    ...(options.headers || {})
+  };
+  if (method !== 'GET' && method !== 'HEAD' && !headers['Content-Type'] && !headers['content-type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const response = await fetch(path, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(),
-      ...(options.headers || {})
-    }
+    headers
   });
 
   if (response.status === 401) {
@@ -57,7 +74,16 @@ async function api(path, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(`API-Fehler ${response.status}`);
+    let detail = `API-Fehler ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload?.error) {
+        detail = payload.error;
+      }
+    } catch {
+      /* keep status text */
+    }
+    throw new Error(detail);
   }
 
   if (response.status === 204) {
@@ -70,6 +96,28 @@ async function api(path, options = {}) {
   }
 
   throw new Error('Unerwartete Server-Antwort');
+}
+
+function instrumentNamesOf(piece) {
+  const value = piece?.instrumentNames;
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).filter(Boolean);
+  }
+  if (value == null || value === '') {
+    return [];
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map((item) => String(item)).filter(Boolean) : [];
+    } catch {
+      return value ? [value] : [];
+    }
+  }
+  if (typeof value === 'object') {
+    return Object.values(value).map((item) => String(item)).filter(Boolean);
+  }
+  return [];
 }
 
 function showLogin(message = '') {
@@ -86,8 +134,7 @@ function showLogin(message = '') {
 function showApp() {
   els.loginScreen.classList.add('hidden');
   els.appRoot.classList.remove('hidden');
-  els.statusBadge.textContent = 'Angemeldet';
-  els.statusBadge.className = 'badge ok';
+  showStatus('Angemeldet');
 }
 
 function logout() {
@@ -130,7 +177,7 @@ function isCompactLayout() {
 }
 
 function setDetailOpen(open) {
-  document.body.classList.toggle('detail-open', Boolean(open));
+  document.body.classList.toggle('detail-open', Boolean(open) && isCompactLayout());
 }
 
 function closePieceDetail() {
@@ -141,40 +188,88 @@ function closePieceDetail() {
   setDetailOpen(false);
 }
 
-function buildQuery() {
-  const params = new URLSearchParams();
-  const q = els.searchInput.value.trim();
-  if (q) params.set('q', q);
-  if (els.genreFilter.value) params.set('genre', els.genreFilter.value);
-  if (els.cabinetFilter.value) params.set('cabinet', els.cabinetFilter.value);
-  if (els.withScoresFilter.checked) params.set('withScores', '1');
-  if (els.activeOnlyFilter.checked) params.set('activeOnly', '1');
-  const query = params.toString();
-  return query ? `?${query}` : '';
+function syncCompactDetailClass() {
+  if (state.selectedPieceUid && isCompactLayout()) {
+    setDetailOpen(true);
+  } else {
+    document.body.classList.remove('detail-open');
+  }
 }
 
 async function loadFilters() {
   const { genres, cabinets } = await api('/api/meta/filters');
+  const selectedGenre = els.genreFilter.value;
+  const selectedCabinet = els.cabinetFilter.value;
   els.genreFilter.length = 1;
   els.cabinetFilter.length = 1;
-  for (const genre of genres) {
+  for (const genre of genres || []) {
     const option = document.createElement('option');
     option.value = genre;
     option.textContent = genre;
     els.genreFilter.appendChild(option);
   }
-  for (const cabinet of cabinets) {
+  for (const cabinet of cabinets || []) {
     const option = document.createElement('option');
     option.value = cabinet;
     option.textContent = `Schrank ${cabinet}`;
     els.cabinetFilter.appendChild(option);
   }
+  if ([...els.genreFilter.options].some((option) => option.value === selectedGenre)) {
+    els.genreFilter.value = selectedGenre;
+  }
+  if ([...els.cabinetFilter.options].some((option) => option.value === selectedCabinet)) {
+    els.cabinetFilter.value = selectedCabinet;
+  }
+}
+
+function applyFilters() {
+  const q = els.searchInput.value.trim().toLowerCase();
+  const genre = els.genreFilter.value;
+  const cabinet = els.cabinetFilter.value;
+  const withScores = els.withScoresFilter.checked;
+  const activeOnly = els.activeOnlyFilter.checked;
+
+  state.pieces = state.allPieces.filter((piece) => {
+    if (activeOnly && !piece.isActive) {
+      return false;
+    }
+    if (genre && piece.genre !== genre) {
+      return false;
+    }
+    if (cabinet && piece.cabinet !== cabinet) {
+      return false;
+    }
+    if (withScores && !(Number(piece.sheetCount) > 0)) {
+      return false;
+    }
+    if (q) {
+      const haystack = [
+        piece.title,
+        piece.composer,
+        piece.arranger,
+        piece.tags,
+        piece.folderPath,
+        instrumentNamesOf(piece).join(' ')
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (!haystack.includes(q)) {
+        return false;
+      }
+    }
+    return true;
+  });
+  renderPieceList();
 }
 
 async function loadPieces() {
-  const data = await api(`/api/pieces${buildQuery()}`);
-  state.pieces = data.pieces;
-  renderPieceList();
+  try {
+    const data = await api('/api/pieces');
+    state.allPieces = Array.isArray(data?.pieces) ? data.pieces : [];
+    applyFilters();
+  } catch (error) {
+    showStatus(error.message, true);
+  }
 }
 
 function renderPieceList() {
@@ -195,7 +290,7 @@ function renderPieceList() {
     button.className = piece.syncUid === state.selectedPieceUid ? 'active' : '';
     button.innerHTML = `
       <div class="piece-title">${escapeHtml(piece.title)}</div>
-      <div class="piece-sub">${escapeHtml(piece.composer || 'Unbekannter Komponist')} · ${piece.sheetCount} Noten</div>
+      <div class="piece-sub">${escapeHtml(piece.composer || 'Unbekannter Komponist')} · ${Number(piece.sheetCount) || 0} Noten</div>
     `;
     button.addEventListener('click', () => selectPiece(piece.syncUid, { focusDetail: isCompactLayout() }));
     button.addEventListener('dblclick', (event) => {
@@ -231,7 +326,12 @@ async function selectPiece(syncUid, { focusDetail = false } = {}) {
       const data = await api(`/api/pieces/${encodeURIComponent(syncUid)}`);
       if (state.selectedPieceUid !== syncUid) return;
       state.selectedPiece = data.piece;
-      renderPieceDetail(data.piece, data.sheets);
+      renderPieceDetail(data.piece, data.sheets || []);
+    } catch (error) {
+      if (state.selectedPieceUid !== syncUid) return;
+      showStatus(error.message, true);
+      els.detailTitle.textContent = 'Details konnten nicht geladen werden';
+      els.detailMeta.textContent = error.message;
     } finally {
       if (state.loadingPieceUid === syncUid) {
         state.loadingPieceUid = null;
@@ -285,20 +385,21 @@ function renderPieceDetail(piece, sheets) {
     .map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '–')}</dd>`)
     .join('');
 
+  const instrumentNames = instrumentNamesOf(piece);
   els.detailInstruments.innerHTML = '';
-  for (const name of piece.instrumentNames || []) {
+  for (const name of instrumentNames) {
     const li = document.createElement('li');
     li.textContent = name;
     els.detailInstruments.appendChild(li);
   }
-  if ((piece.instrumentNames || []).length === 0) {
+  if (instrumentNames.length === 0) {
     const li = document.createElement('li');
     li.textContent = 'Keine Besetzung hinterlegt';
     els.detailInstruments.appendChild(li);
   }
 
   els.sheetList.innerHTML = '';
-  if (sheets.length === 0) {
+  if (!Array.isArray(sheets) || sheets.length === 0) {
     const li = document.createElement('li');
     li.innerHTML = '<p class="muted">Keine digitalen Noten vorhanden.</p>';
     els.sheetList.appendChild(li);
@@ -341,7 +442,11 @@ function parseHashRoute() {
 }
 
 async function bootstrapApp() {
-  await loadFilters();
+  try {
+    await loadFilters();
+  } catch (error) {
+    showStatus(`Filter: ${error.message}`, true);
+  }
   await loadPieces();
   const routePiece = parseHashRoute();
   if (routePiece) {
@@ -363,6 +468,65 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('de-DE');
 }
 
+function closeWipeDialog() {
+  if (els.wipeDialog?.open) {
+    els.wipeDialog.close();
+  }
+  if (els.wipeConfirmInput) {
+    els.wipeConfirmInput.value = '';
+  }
+  if (els.wipeError) {
+    els.wipeError.classList.add('hidden');
+    els.wipeError.textContent = '';
+  }
+}
+
+function openWipeDialog() {
+  if (!els.wipeDialog) {
+    return;
+  }
+  els.wipeError.classList.add('hidden');
+  els.wipeConfirmInput.value = '';
+  if (typeof els.wipeDialog.showModal === 'function') {
+    els.wipeDialog.showModal();
+  } else {
+    els.wipeDialog.setAttribute('open', '');
+  }
+  els.wipeConfirmInput.focus();
+}
+
+async function submitWipe(event) {
+  event.preventDefault();
+  const typed = els.wipeConfirmInput.value.trim();
+  if (typed !== 'LÖSCHEN') {
+    els.wipeError.textContent = 'Bitte genau LÖSCHEN eingeben.';
+    els.wipeError.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const result = await api('/api/web/wipe', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: 'LÖSCHEN' })
+    });
+    closeWipeDialog();
+    state.selectedPiece = null;
+    state.selectedPieceUid = null;
+    window.location.hash = '';
+    setDetailOpen(false);
+    els.emptyState.classList.remove('hidden');
+    els.detailView.classList.add('hidden');
+    await bootstrapApp();
+    showStatus(
+      `Web-Datenbank geleert (${result?.pieces ?? 0} Stücke, ${result?.sheets ?? 0} Noten). Passwort bleibt erhalten.`
+    );
+  } catch (error) {
+    els.wipeError.textContent = error.message;
+    els.wipeError.classList.remove('hidden');
+    showStatus(error.message, true);
+  }
+}
+
 els.loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   els.loginError.classList.add('hidden');
@@ -378,18 +542,49 @@ els.logoutButton.addEventListener('click', logout);
 els.backToListButton.addEventListener('click', closePieceDetail);
 els.printPieceButton.addEventListener('click', printPieceInfo);
 
-const reloadPieces = debounce(() => {
-  loadPieces().catch((error) => {
-    els.statusBadge.textContent = error.message;
-    els.statusBadge.className = 'badge error';
+if (els.wipeButton) {
+  els.wipeButton.addEventListener('click', openWipeDialog);
+}
+if (els.wipeCancelButton) {
+  els.wipeCancelButton.addEventListener('click', closeWipeDialog);
+}
+if (els.wipeForm) {
+  els.wipeForm.addEventListener('submit', submitWipe);
+}
+if (els.wipeDialog) {
+  els.wipeDialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeWipeDialog();
   });
+}
+
+const reloadFilters = debounce(() => {
+  try {
+    applyFilters();
+  } catch (error) {
+    showStatus(error.message, true);
+  }
 }, 250);
 
-els.searchInput.addEventListener('input', reloadPieces);
-els.genreFilter.addEventListener('change', () => loadPieces());
-els.cabinetFilter.addEventListener('change', () => loadPieces());
-els.withScoresFilter.addEventListener('change', () => loadPieces());
-els.activeOnlyFilter.addEventListener('change', () => loadPieces());
+function handleFilterChange() {
+  try {
+    applyFilters();
+  } catch (error) {
+    showStatus(error.message, true);
+  }
+}
+
+els.searchInput.addEventListener('input', reloadFilters);
+els.genreFilter.addEventListener('change', handleFilterChange);
+els.cabinetFilter.addEventListener('change', handleFilterChange);
+els.withScoresFilter.addEventListener('change', handleFilterChange);
+els.activeOnlyFilter.addEventListener('change', handleFilterChange);
+
+if (typeof compactLayoutQuery.addEventListener === 'function') {
+  compactLayoutQuery.addEventListener('change', syncCompactDetailClass);
+} else if (typeof compactLayoutQuery.addListener === 'function') {
+  compactLayoutQuery.addListener(syncCompactDetailClass);
+}
 
 window.addEventListener('hashchange', async () => {
   const routePiece = parseHashRoute();
@@ -398,7 +593,11 @@ window.addEventListener('hashchange', async () => {
     return;
   }
   if (routePiece !== state.selectedPieceUid) {
-    await selectPiece(routePiece);
+    try {
+      await selectPiece(routePiece);
+    } catch (error) {
+      showStatus(error.message, true);
+    }
   } else {
     setDetailOpen(true);
   }

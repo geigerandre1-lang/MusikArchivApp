@@ -60,6 +60,29 @@ function openSheetVault() {
         /* ignore */
       }
     },
+    async clearAll() {
+      ensureDir(root);
+      let removed = 0;
+      let names = [];
+      try {
+        names = fs.readdirSync(root);
+      } catch {
+        return 0;
+      }
+      for (const name of names) {
+        const full = path.join(root, name);
+        try {
+          if (!fs.statSync(full).isFile()) {
+            continue;
+          }
+          fs.unlinkSync(full);
+          removed += 1;
+        } catch {
+          /* ignore */
+        }
+      }
+      return removed;
+    },
   };
 }
 

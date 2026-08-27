@@ -194,6 +194,38 @@ namespace MusikArchivApp.Data
             return (true, $"Download abgeschlossen ({payload.Pieces.Count} Stücke, {payload.Sheets.Count} Notendateien).");
         }
 
+        public async Task<(bool ok, string message)> WipeAsync(SyncConfig config, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                using var request = CreateRequest(HttpMethod.Post, config, "/api/sync/wipe");
+                request.Content = JsonContent.Create(new { });
+                using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    return (false, $"Löschen fehlgeschlagen ({(int)response.StatusCode}): {body}");
+                }
+
+                var result = await response.Content.ReadFromJsonAsync<SyncWipeResponse>(JsonOptions, cancellationToken)
+                    .ConfigureAwait(false);
+                config.LastSyncAt = null;
+                await SyncConfigStore.SaveAsync(config).ConfigureAwait(false);
+
+                return (
+                    true,
+                    $"Web-Datenbank geleert ({result?.Pieces ?? 0} Stücke, {result?.Sheets ?? 0} Notendateien, {result?.VaultFiles ?? 0} Tresor-Dateien). Das Web-Passwort bleibt erhalten. Als Nächstes zum Server hochladen.");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Löschen fehlgeschlagen: {ex.Message}");
+            }
+        }
+
         private static HttpRequestMessage CreateRequest(HttpMethod method, SyncConfig config, string path)
         {
             var baseUrl = config.ServerUrl.TrimEnd('/');

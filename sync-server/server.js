@@ -51,6 +51,44 @@ function requireApiKey(req, res, next) {
   next();
 }
 
+function asyncHandler(handler) {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch(next);
+  };
+}
+
+function parseInstrumentNames(value) {
+  if (value == null || value === "") {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => parseInstrumentNames(item)).filter(Boolean);
+  }
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(value)) {
+    return parseInstrumentNames(value.toString("utf8"));
+  }
+  if (typeof value === "object") {
+    return Object.values(value).flatMap((item) => parseInstrumentNames(item)).filter(Boolean);
+  }
+  if (typeof value !== "string") {
+    const asText = String(value).trim();
+    return asText ? [asText] : [];
+  }
+  const text = value.trim();
+  if (!text) {
+    return [];
+  }
+  const looksJson = text.startsWith("[") || text.startsWith("{") || text.startsWith('"');
+  if (looksJson) {
+    try {
+      return parseInstrumentNames(JSON.parse(text));
+    } catch {
+      return [text];
+    }
+  }
+  return [text];
+}
+
 function mapPieceRow(row, sheetCount) {
   return {
     syncUid: row.sync_uid,
@@ -66,9 +104,9 @@ function mapPieceRow(row, sheetCount) {
     slot: row.slot,
     isActive: Number(row.is_active) === 1,
     folderPath: row.folder_path,
-    instrumentNames: JSON.parse(row.instrument_names_json || "[]"),
+    instrumentNames: parseInstrumentNames(row.instrument_names_json),
     updatedAt: row.updated_at,
-    sheetCount: sheetCount ?? 0,
+    sheetCount: Number(sheetCount ?? row.sheet_count ?? 0) || 0,
   };
 }
 
@@ -91,6 +129,24 @@ async function start() {
   const db = await openDatabase();
   const sheetVault = openSheetVault();
   await migrateBlobsFromCatalog(db, sheetVault);
+
+  async function countRows(table) {
+    const row = await db.get(`SELECT COUNT(*) AS n FROM ${table}`);
+    return Number(row?.n ?? 0) || 0;
+  }
+
+  async function wipeCatalog() {
+    const pieces = await countRows("pieces");
+    const sheets = await countRows("sheet_files");
+    const tombstones = await countRows("sync_tombstones");
+    await db.transaction(async (tx) => {
+      await tx.run("DELETE FROM sheet_files");
+      await tx.run("DELETE FROM pieces");
+      await tx.run("DELETE FROM sync_tombstones");
+    });
+    const vaultFiles = await sheetVault.clearAll();
+    return { pieces, sheets, tombstones, vaultFiles };
+  }
 
   async function getSetting(key, fallback = "") {
     const row = await db.get("SELECT value FROM server_settings WHERE `key` = ?", [key]);
@@ -314,61 +370,19 @@ async function start() {
     res.json({ authenticated: isValidSession(token) });
   });
 
-  app.get("/api/pieces", requireWebAuth, async (req, res) => {
-    const q = String(req.query.q || "").trim().toLowerCase();
-    const genre = String(req.query.genre || "").trim();
-    const cabinet = String(req.query.cabinet || "").trim();
-    const withScores = req.query.withScores === "1";
-    const activeOnly = req.query.activeOnly === "1";
+  app.get("/api/pieces", requireWebAuth, asyncHandler(async (_req, res) => {
+    const orderSql = db.dialect === "mysql" ? "ORDER BY p.title" : "ORDER BY p.title COLLATE NOCASE";
+    const rows = await db.all(
+      `SELECT p.*, (
+         SELECT COUNT(*) FROM sheet_files sf WHERE sf.piece_sync_uid = p.sync_uid
+       ) AS sheet_count
+       FROM pieces p
+       ${orderSql}`,
+    );
+    res.json({ pieces: rows.map((row) => mapPieceRow(row, row.sheet_count)) });
+  }));
 
-    let sql = `
-      SELECT p.*, COUNT(sf.sync_uid) AS sheet_count
-      FROM pieces p
-      LEFT JOIN sheet_files sf ON sf.piece_sync_uid = p.sync_uid
-      WHERE 1=1
-    `;
-    const params = [];
-
-    if (activeOnly) {
-      sql += " AND p.is_active = 1";
-    }
-    if (genre) {
-      sql += " AND p.genre = ?";
-      params.push(genre);
-    }
-    if (cabinet) {
-      sql += " AND p.cabinet = ?";
-      params.push(cabinet);
-    }
-    if (withScores) {
-      sql += " AND EXISTS (SELECT 1 FROM sheet_files sf2 WHERE sf2.piece_sync_uid = p.sync_uid)";
-    }
-
-    sql += db.dialect === "mysql" ? " GROUP BY p.sync_uid ORDER BY p.title" : " GROUP BY p.sync_uid ORDER BY p.title COLLATE NOCASE";
-
-    const rows = await db.all(sql, params);
-    let pieces = rows.map((row) => mapPieceRow(row, row.sheet_count));
-
-    if (q) {
-      pieces = pieces.filter((piece) => {
-        const haystack = [
-          piece.title,
-          piece.composer,
-          piece.arranger,
-          piece.tags,
-          piece.folderPath,
-          piece.instrumentNames.join(" "),
-        ]
-          .join(" ")
-          .toLowerCase();
-        return haystack.includes(q);
-      });
-    }
-
-    res.json({ pieces });
-  });
-
-  app.get("/api/pieces/:syncUid", requireWebAuth, async (req, res) => {
+  app.get("/api/pieces/:syncUid", requireWebAuth, asyncHandler(async (req, res) => {
     const row = await db.get("SELECT * FROM pieces WHERE sync_uid = ?", [req.params.syncUid]);
     if (!row) {
       return res.status(404).json({ error: "Stück nicht gefunden" });
@@ -389,9 +403,9 @@ async function start() {
       piece: mapPieceRow(row, sheets.length),
       sheets,
     });
-  });
+  }));
 
-  app.get("/api/meta/filters", requireWebAuth, async (_req, res) => {
+  app.get("/api/meta/filters", requireWebAuth, asyncHandler(async (_req, res) => {
     const genres = (
       await db.all("SELECT DISTINCT genre FROM pieces WHERE genre IS NOT NULL AND genre != '' ORDER BY genre")
     ).map((r) => r.genre);
@@ -399,9 +413,23 @@ async function start() {
       await db.all("SELECT DISTINCT cabinet FROM pieces WHERE cabinet IS NOT NULL AND cabinet != '' ORDER BY cabinet")
     ).map((r) => r.cabinet);
     res.json({ genres, cabinets });
-  });
+  }));
 
-  app.post("/api/sync/push", requireApiKey, async (req, res) => {
+  app.post("/api/sync/wipe", requireApiKey, asyncHandler(async (_req, res) => {
+    const result = await wipeCatalog();
+    res.json({ ok: true, ...result });
+  }));
+
+  app.post("/api/web/wipe", requireWebAuth, asyncHandler(async (req, res) => {
+    const confirm = String(req.body?.confirm || "").trim();
+    if (confirm !== "LÖSCHEN") {
+      return res.status(400).json({ error: "Bestätigung ungültig. Bitte LÖSCHEN eingeben." });
+    }
+    const result = await wipeCatalog();
+    res.json({ ok: true, ...result });
+  }));
+
+  app.post("/api/sync/push", requireApiKey, asyncHandler(async (req, res) => {
     const pieces = req.body?.pieces || [];
     const sheets = req.body?.sheets || [];
     const tombstones = req.body?.tombstones || [];
@@ -466,9 +494,9 @@ async function start() {
       tombstones: tombstones.length,
       passwordWarning,
     });
-  });
+  }));
 
-  app.get("/api/sync/pull", requireApiKey, async (req, res) => {
+  app.get("/api/sync/pull", requireApiKey, asyncHandler(async (req, res) => {
     const since = req.query.since ? String(req.query.since) : "";
 
     const pieceRows = since
@@ -513,12 +541,20 @@ async function start() {
         deletedAt: row.deleted_at,
       })),
     });
-  });
+  }));
 
   app.use(express.static(PUBLIC_DIR));
 
   app.get("*", (_req, res) => {
     res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+  });
+
+  app.use((err, _req, res, _next) => {
+    console.error(err);
+    if (res.headersSent) {
+      return;
+    }
+    res.status(500).json({ error: "Interner Serverfehler" });
   });
 
   const server = app.listen(PORT, HOST, () => {

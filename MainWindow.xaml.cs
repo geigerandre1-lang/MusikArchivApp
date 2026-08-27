@@ -3083,6 +3083,52 @@ namespace MusikArchivApp
             }
         }
 
+        private async void SyncWipe_Click(object sender, RoutedEventArgs e)
+        {
+            if (!IsAdminLoggedIn)
+            {
+                return;
+            }
+
+            var confirm = UiMessage.Confirm(
+                "Wirklich ALLE Stücke, Notenlisten und den Notentresor auf dem Web-Server löschen?\n\nDas Web-Passwort bleibt erhalten. Die Desktop-Daten bleiben unberührt. Danach zum Server hochladen, um den Bestand neu zu übertragen.",
+                "Web-Datenbank leeren",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            if (!TryBeginSyncOperation(SyncOperation.Wiping, "Web-Datenbank wird geleert …"))
+            {
+                return;
+            }
+
+            ReadSyncConfigFromUi();
+            try
+            {
+                var (ok, message) = await syncService.WipeAsync(syncConfig, syncCancellation!.Token).ConfigureAwait(true);
+                RefreshSyncStatusUi();
+                SetSyncActivityMessage(message);
+                if (SyncStatusText != null)
+                {
+                    SyncStatusText.Text = message;
+                }
+
+                UiMessage.Show(message, ok ? "Web-Datenbank" : "Fehler",
+                    MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
+            }
+            catch (OperationCanceledException)
+            {
+                SetSyncActivityMessage("Löschen abgebrochen.");
+            }
+            finally
+            {
+                EndSyncOperation();
+            }
+        }
+
         private async void SyncPull_Click(object sender, RoutedEventArgs e)
         {
             if (!TryBeginSyncOperation(SyncOperation.Downloading, "Download läuft …"))
@@ -3219,6 +3265,11 @@ namespace MusikArchivApp
                 SyncPullButton.IsEnabled = !busy;
             }
 
+            if (SyncWipeButton != null)
+            {
+                SyncWipeButton.IsEnabled = !busy;
+            }
+
             if (SyncStopUploadButton != null)
             {
                 SyncStopUploadButton.Visibility = activeSyncOperation == SyncOperation.Uploading
@@ -3232,6 +3283,7 @@ namespace MusikArchivApp
             SyncOperation.Testing => "Verbindungstest",
             SyncOperation.Uploading => "Upload",
             SyncOperation.Downloading => "Download",
+            SyncOperation.Wiping => "Web-Datenbank leeren",
             _ => "Sync"
         };
 
@@ -3240,7 +3292,8 @@ namespace MusikArchivApp
             None,
             Testing,
             Uploading,
-            Downloading
+            Downloading,
+            Wiping
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

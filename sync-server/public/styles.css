@@ -111,7 +111,7 @@ body {
   gap: 16px;
   padding: 16px;
   flex: 1;
-  min-height: 0;
+  min-height: calc(100dvh - 160px);
 }
 
 .piece-list-panel,
@@ -123,6 +123,10 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.detail-panel {
+  min-height: 280px;
 }
 
 .panel-header {
@@ -202,6 +206,7 @@ body {
 .detail-view {
   padding: 16px;
   overflow: auto;
+  flex: 1;
 }
 
 .detail-view:focus {
@@ -366,12 +371,52 @@ body {
 }
 
 .login-card button[type="submit"],
-.secondary-button {
+.secondary-button,
+.danger-button {
   padding: 8px 14px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: white;
   cursor: pointer;
+}
+
+.danger-button {
+  color: var(--danger);
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.danger-button:hover {
+  background: #fee2e2;
+}
+
+.wipe-dialog {
+  width: min(100%, 460px);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.wipe-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.wipe-dialog h2 {
+  margin: 0 0 10px;
+}
+
+.wipe-dialog p {
+  margin: 0 0 12px;
+}
+
+.wipe-dialog input {
+  width: 100%;
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .login-card button[type="submit"] {
@@ -462,7 +507,7 @@ body {
   .layout {
     grid-template-columns: 1fr;
     flex: 1;
-    min-height: 0;
+    min-height: calc(100dvh - 160px);
     display: flex;
     flex-direction: column;
   }
@@ -504,6 +549,8 @@ body {
 
   body.detail-open .detail-panel {
     display: flex;
+    min-height: 280px;
+    flex: 1;
   }
 
   body.detail-open .detail-grid {

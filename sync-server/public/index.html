@@ -44,6 +44,7 @@
           <input id="activeOnlyFilter" type="checkbox">
           Nur im Probelokal
         </label>
+        <button id="wipeButton" type="button" class="danger-button">Web-Daten löschen</button>
         <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
       </div>
     </header>
@@ -96,6 +97,20 @@
         </div>
       </section>
     </main>
+
+    <dialog id="wipeDialog" class="wipe-dialog">
+      <form id="wipeForm" method="dialog">
+        <h2>Web-Datenbank leeren</h2>
+        <p>Löscht alle Stücke, Notenlisten und den Notentresor auf diesem Server. Das Web-Passwort bleibt erhalten. Danach in der Desktop-App neu hochladen.</p>
+        <label for="wipeConfirmInput">Zum Bestätigen <strong>LÖSCHEN</strong> eingeben:</label>
+        <input id="wipeConfirmInput" type="text" autocomplete="off" spellcheck="false">
+        <p id="wipeError" class="login-error hidden"></p>
+        <div class="detail-actions">
+          <button type="button" id="wipeCancelButton" class="secondary-button">Abbrechen</button>
+          <button type="submit" class="danger-button">Endgültig löschen</button>
+        </div>
+      </form>
+    </dialog>
   </div>
 
   <footer class="site-footer">

@@ -42,6 +42,15 @@ namespace MusikArchivApp.Models
         public string? Version { get; set; }
     }
 
+    public class SyncWipeResponse
+    {
+        public bool Ok { get; set; }
+        public int Pieces { get; set; }
+        public int Sheets { get; set; }
+        public int Tombstones { get; set; }
+        public int VaultFiles { get; set; }
+    }
+
     public class PieceSyncDto
     {
         public string SyncUid { get; set; } = string.Empty;

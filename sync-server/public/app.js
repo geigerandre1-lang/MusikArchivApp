@@ -5,10 +5,7 @@ const state = {
   pieces: [],
   selectedPiece: null,
   selectedPieceUid: null,
-  selectedSheet: null,
-  selectedSheetUid: null,
-  loadingPieceUid: null,
-  previewObjectUrl: null
+  loadingPieceUid: null
 };
 
 const els = {
@@ -37,23 +34,11 @@ const els = {
   detailInstruments: document.getElementById('detailInstruments'),
   printPieceArea: document.getElementById('printPieceArea'),
   printPieceButton: document.getElementById('printPieceButton'),
-  sheetList: document.getElementById('sheetList'),
-  previewEmpty: document.getElementById('previewEmpty'),
-  previewFrame: document.getElementById('previewFrame'),
-  pdfPreview: document.getElementById('pdfPreview'),
-  imagePreview: document.getElementById('imagePreview'),
-  openFileLink: document.getElementById('openFileLink'),
-  printSheetButton: document.getElementById('printSheetButton')
+  sheetList: document.getElementById('sheetList')
 };
 
 function authHeaders() {
   return state.token ? { Authorization: `Bearer ${state.token}` } : {};
-}
-
-function withToken(path) {
-  if (!state.token) return path;
-  const separator = path.includes('?') ? '&' : '?';
-  return `${path}${separator}token=${encodeURIComponent(state.token)}`;
 }
 
 async function api(path, options = {}) {
@@ -84,7 +69,7 @@ async function api(path, options = {}) {
     return response.json();
   }
 
-  return response.blob();
+  throw new Error('Unerwartete Server-Antwort');
 }
 
 function showLogin(message = '') {
@@ -234,9 +219,6 @@ async function selectPiece(syncUid, { focusDetail = false } = {}) {
     }
   } else {
     state.loadingPieceUid = syncUid;
-    state.selectedSheetUid = null;
-    state.selectedSheet = null;
-    clearPreview();
     renderPieceList();
     els.emptyState.classList.add('hidden');
     els.detailView.classList.remove('hidden');
@@ -325,15 +307,12 @@ function renderPieceDetail(piece, sheets) {
 
   for (const sheet of sheets) {
     const li = document.createElement('li');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = sheet.syncUid === state.selectedSheetUid ? 'active' : '';
-    button.innerHTML = `
-      <div class="sheet-name">${escapeHtml(sheet.fileName)}</div>
+    li.className = 'sheet-present';
+    const label = sheet.fileName || 'Note';
+    li.innerHTML = `
+      <div class="sheet-name">${escapeHtml(`Note ${label} vorhanden`)}</div>
       <div class="sheet-assignment">${escapeHtml(formatAssignment(sheet))}</div>
     `;
-    button.addEventListener('click', () => selectSheet(sheet, button));
-    li.appendChild(button);
     els.sheetList.appendChild(li);
   }
 }
@@ -349,88 +328,11 @@ function formatAssignment(sheet) {
   }
 }
 
-async function selectSheet(sheet, button) {
-  state.selectedSheet = sheet;
-  state.selectedSheetUid = sheet.syncUid;
-  els.sheetList.querySelectorAll('button').forEach((btn) => {
-    btn.classList.toggle('active', btn === button);
-  });
-
-  clearPreview();
-  const filePath = `/api/sheets/${encodeURIComponent(sheet.syncUid)}/file`;
-  const fileUrl = withToken(filePath);
-  els.openFileLink.href = fileUrl;
-  els.openFileLink.classList.remove('hidden');
-  els.printSheetButton.classList.remove('hidden');
-  els.previewEmpty.classList.add('hidden');
-  els.previewFrame.classList.remove('hidden');
-
-  const lower = sheet.fileName.toLowerCase();
-  if (lower.endsWith('.pdf')) {
-    const blob = await api(filePath);
-    state.previewObjectUrl = URL.createObjectURL(blob);
-    els.pdfPreview.src = state.previewObjectUrl;
-    els.pdfPreview.classList.remove('hidden');
-    return;
-  }
-
-  if (/\.(png|jpe?g|tif?f|bmp)$/i.test(lower)) {
-    const blob = await api(filePath);
-    state.previewObjectUrl = URL.createObjectURL(blob);
-    els.imagePreview.src = state.previewObjectUrl;
-    els.imagePreview.classList.remove('hidden');
-    return;
-  }
-
-  els.previewEmpty.classList.remove('hidden');
-  els.previewEmpty.innerHTML = '<p>Vorschau für dieses Format nicht unterstützt.</p>';
-  els.previewFrame.classList.add('hidden');
-}
-
-function clearPreview() {
-  els.pdfPreview.src = 'about:blank';
-  els.imagePreview.removeAttribute('src');
-  els.pdfPreview.classList.add('hidden');
-  els.imagePreview.classList.add('hidden');
-  els.previewFrame.classList.add('hidden');
-  els.previewEmpty.classList.remove('hidden');
-  els.previewEmpty.innerHTML = '<p>Notendatei auswählen.</p>';
-  els.openFileLink.classList.add('hidden');
-  els.printSheetButton.classList.add('hidden');
-
-  if (state.previewObjectUrl) {
-    URL.revokeObjectURL(state.previewObjectUrl);
-    state.previewObjectUrl = null;
-  }
-}
-
 function printPieceInfo() {
   if (!state.selectedPiece) return;
   document.body.classList.add('printing-piece');
   window.print();
   window.addEventListener('afterprint', () => document.body.classList.remove('printing-piece'), { once: true });
-}
-
-function printSheetPreview() {
-  const lower = state.selectedSheet?.fileName?.toLowerCase() || '';
-  if (lower.endsWith('.pdf') && els.pdfPreview.contentWindow) {
-    els.pdfPreview.contentWindow.focus();
-    els.pdfPreview.contentWindow.print();
-    return;
-  }
-
-  if (/\.(png|jpe?g|tif?f|bmp)$/i.test(lower)) {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-    printWindow.document.write(`
-      <html><head><title>${escapeHtml(state.selectedSheet.fileName)}</title></head>
-      <body style="margin:0;text-align:center"><img src="${els.imagePreview.src}" style="max-width:100%"></body></html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
-  }
 }
 
 function parseHashRoute() {
@@ -475,7 +377,6 @@ els.loginForm.addEventListener('submit', async (event) => {
 els.logoutButton.addEventListener('click', logout);
 els.backToListButton.addEventListener('click', closePieceDetail);
 els.printPieceButton.addEventListener('click', printPieceInfo);
-els.printSheetButton.addEventListener('click', printSheetPreview);
 
 const reloadPieces = debounce(() => {
   loadPieces().catch((error) => {

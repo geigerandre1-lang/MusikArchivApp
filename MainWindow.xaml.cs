@@ -1119,8 +1119,8 @@ namespace MusikArchivApp
 
             syncConfig = SyncConfigStore.Load();
             var webPassword = string.IsNullOrWhiteSpace(syncConfig.WebViewPassword)
-                ? "admin"
-                : syncConfig.WebViewPassword;
+                ? "(nicht gesetzt)"
+                : new string('•', Math.Min(syncConfig.WebViewPassword.Length, 18));
             var apiKey = string.IsNullOrWhiteSpace(syncConfig.ApiKey)
                 ? "(nicht gesetzt)"
                 : syncConfig.ApiKey;
@@ -2928,7 +2928,8 @@ namespace MusikArchivApp
             SyncServerUrlTextBox.Text = syncConfig.ServerUrl;
             SyncApiKeyBox.Password = syncConfig.ApiKey ?? string.Empty;
             SyncWebPasswordBox.Password = string.IsNullOrWhiteSpace(syncConfig.WebViewPassword)
-                ? "admin"
+                || string.Equals(syncConfig.WebViewPassword, "admin", StringComparison.Ordinal)
+                ? string.Empty
                 : syncConfig.WebViewPassword;
             SyncWarningDaysTextBox.Text = syncConfig.SyncWarningDays.ToString();
             RefreshSyncStatusUi();
@@ -2966,9 +2967,10 @@ namespace MusikArchivApp
         {
             syncConfig.ServerUrl = SyncServerUrlTextBox.Text.Trim();
             syncConfig.ApiKey = string.IsNullOrWhiteSpace(SyncApiKeyBox.Password) ? null : SyncApiKeyBox.Password;
-            syncConfig.WebViewPassword = string.IsNullOrWhiteSpace(SyncWebPasswordBox.Password)
-                ? "admin"
-                : SyncWebPasswordBox.Password;
+            if (SyncWebPasswordBox != null && !string.IsNullOrWhiteSpace(SyncWebPasswordBox.Password))
+            {
+                syncConfig.WebViewPassword = SyncWebPasswordBox.Password;
+            }
 
             if (int.TryParse(SyncWarningDaysTextBox.Text.Trim(), out var warningDays) && warningDays >= 0)
             {
@@ -3000,6 +3002,12 @@ namespace MusikArchivApp
         private async void SyncSaveConfig_Click(object sender, RoutedEventArgs e)
         {
             ReadSyncConfigFromUi();
+            if (!WebPasswordPolicy.TryValidate(syncConfig.WebViewPassword, out var passwordError))
+            {
+                UiMessage.Show(passwordError, "Web-Passwort", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             await SyncConfigStore.SaveAsync(syncConfig).ConfigureAwait(true);
             RefreshSyncStatusUi();
             UpdateAdminCredentialsDisplay();

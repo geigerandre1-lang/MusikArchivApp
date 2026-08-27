@@ -49,6 +49,14 @@ node migrate-sqlite.js /pfad/zur/sync.db
 
 Zusätzlich die Desktop-App einmal **hochladen / synchronisieren** — sie ist die vollständige lokale Quelle.
 
+## Web-App
+
+Fußzeile mit Copyright, [Impressum](/impressum.html) und [Datenschutz](/datenschutz.html) (ohne Login erreichbar).
+
+Noten-PDFs sind **nicht** in der Web-Ansicht: kein Anzeigen, kein Download. Es steht nur „Note … vorhanden“. Die Dateien liegen im **Notentresor** (`data/sheets-vault/`, auf Hostinger `domains/.../data/sheets-vault/`) **außerhalb** der Katalog-Datenbank. Die Web-App hat darauf keinen Zugriff. Nur die Desktop-App (API-Schlüssel) darf sichern und wiederherstellen.
+
+Web-Passwort: mindestens 14 Zeichen, ein Großbuchstabe, ein Kleinbuchstabe, ein Sonderzeichen. Speicherung nur als bcrypt-Hash. Übertragung per HTTPS (im Panel SSL aktivieren) und POST-JSON, nicht in der URL.
+
 ## Lokal
 
 ```bash

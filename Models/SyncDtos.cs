@@ -12,6 +12,15 @@ namespace MusikArchivApp.Models
         public List<SyncTombstoneDto> Tombstones { get; set; } = new();
     }
 
+    public class SyncPushResponse
+    {
+        public bool Ok { get; set; }
+        public int Pieces { get; set; }
+        public int Sheets { get; set; }
+        public int Tombstones { get; set; }
+        public string? PasswordWarning { get; set; }
+    }
+
     public class SyncPullResponse
     {
         public DateTime ServerTime { get; set; }

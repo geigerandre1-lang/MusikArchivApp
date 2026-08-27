@@ -80,7 +80,10 @@ namespace MusikArchivApp.Data
                 cancellationToken).ConfigureAwait(false);
 
             payload.ClientLastSyncAt = config.LastSyncAt;
-            payload.WebViewPassword = config.WebViewPassword;
+            if (WebPasswordPolicy.TryValidate(config.WebViewPassword, out _))
+            {
+                payload.WebViewPassword = config.WebViewPassword;
+            }
 
             Report(progress, "JSON serialisieren", PrepareWeightPercent);
             var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
@@ -104,10 +107,23 @@ namespace MusikArchivApp.Data
                 return (false, $"Upload fehlgeschlagen ({(int)response.StatusCode}): {body}");
             }
 
+            var pushResult = await response.Content.ReadFromJsonAsync<SyncPushResponse>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
             config.LastSyncAt = DateTime.UtcNow;
             await SyncConfigStore.SaveAsync(config).ConfigureAwait(false);
             Report(progress, "Upload abgeschlossen", 100, jsonBytes.Length, jsonBytes.Length);
-            return (true, $"Upload abgeschlossen ({payload.Pieces.Count} Stücke, {payload.Sheets.Count} Notendateien).");
+
+            var message = $"Upload abgeschlossen ({payload.Pieces.Count} Stücke, {payload.Sheets.Count} Notendateien).";
+            if (!WebPasswordPolicy.TryValidate(config.WebViewPassword, out var policyError))
+            {
+                message += $" Web-Passwort nicht übertragen: {policyError}";
+            }
+            else if (!string.IsNullOrWhiteSpace(pushResult?.PasswordWarning))
+            {
+                message += $" {pushResult.PasswordWarning}";
+            }
+
+            return (true, message);
         }
 
         public async Task<(bool ok, string message)> PullAsync(

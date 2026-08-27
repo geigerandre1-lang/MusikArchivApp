@@ -807,7 +807,8 @@
 
                                 <TextBlock Text="Web-App Passwort (Ansicht)" Margin="0,0,0,4"/>
                                 <PasswordBox x:Name="SyncWebPasswordBox" Margin="0,0,0,4"/>
-                                <TextBlock Text="Standard: admin · wird beim Hochladen an den Server übertragen." Foreground="#888888" FontSize="11" Margin="0,0,0,8"/>
+                                <TextBlock Text="Mindestens 14 Zeichen, 1 Großbuchstabe, 1 Kleinbuchstabe, 1 Sonderzeichen. Wird beim Hochladen als Hash auf dem Server gespeichert, nicht im Klartext."
+                                           Foreground="#888888" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                                     <Button Content="Konfiguration speichern" Width="150" Margin="0,0,8,0" Click="SyncSaveConfig_Click"/>

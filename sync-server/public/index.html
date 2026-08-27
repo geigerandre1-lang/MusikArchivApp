@@ -15,7 +15,8 @@
       <h1>Musikarchiv</h1>
       <p class="muted">Passwortgeschützte Ansicht</p>
       <label for="loginPassword">Passwort</label>
-      <input id="loginPassword" type="password" autocomplete="current-password" required>
+      <input id="loginPassword" type="password" autocomplete="current-password" required minlength="1">
+      <p class="muted login-hint">Mindestens 14 Zeichen, ein Großbuchstabe, ein Kleinbuchstabe und ein Sonderzeichen (beim Setzen in der Desktop-App).</p>
       <button type="submit">Anmelden</button>
       <p id="loginError" class="login-error hidden"></p>
     </form>
@@ -89,29 +90,21 @@
 
           <div class="sheets-section">
             <h3>Notendateien</h3>
+            <p class="muted sheets-privacy-hint">Noten liegen nur auf dem Server in der Sicherung. In der Web-Ansicht gibt es keinen Zugriff auf die Dateien.</p>
             <ul id="sheetList" class="sheet-list"></ul>
           </div>
         </div>
       </section>
-
-      <section class="preview-panel">
-        <div class="panel-header">
-          <h2>Vorschau</h2>
-          <div class="preview-actions">
-            <button id="printSheetButton" type="button" class="secondary-button hidden">Noten drucken</button>
-            <a id="openFileLink" class="link-button hidden" href="#" target="_blank" rel="noopener">In neuem Tab</a>
-          </div>
-        </div>
-        <div id="previewEmpty" class="empty-state">
-          <p>Notendatei auswählen.</p>
-        </div>
-        <div id="previewFrame" class="preview-frame hidden">
-          <iframe id="pdfPreview" title="PDF-Vorschau" class="hidden"></iframe>
-          <img id="imagePreview" alt="Notenvorschau" class="hidden">
-        </div>
-      </section>
     </main>
   </div>
+
+  <footer class="site-footer">
+    <p>Copyright Geiger André 2026</p>
+    <nav class="footer-nav">
+      <a class="footer-button" href="/impressum.html">Impressum</a>
+      <a class="footer-button" href="/datenschutz.html">Datenschutz</a>
+    </nav>
+  </footer>
 
   <script src="/app.js" type="module"></script>
 </body>

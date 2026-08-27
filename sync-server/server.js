@@ -1,6 +1,8 @@
 const express = require("express");
 const path = require("path");
 const { openDatabase } = require("./db");
+const { hashPassword, isBcryptHash, passwordPolicyError, verifyPassword } = require("./password");
+const { migrateBlobsFromCatalog, openSheetVault } = require("./sheet-vault");
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -30,9 +32,6 @@ function extractWebToken(req) {
   const auth = req.header("authorization");
   if (auth && auth.startsWith("Bearer ")) {
     return auth.slice(7);
-  }
-  if (req.query.token) {
-    return String(req.query.token);
   }
   return null;
 }
@@ -88,41 +87,10 @@ function mapSheetMeta(row) {
   };
 }
 
-function guessContentType(fileName) {
-  const ext = path.extname(fileName).toLowerCase();
-  switch (ext) {
-    case ".pdf":
-      return "application/pdf";
-    case ".png":
-      return "image/png";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".tif":
-    case ".tiff":
-      return "image/tiff";
-    case ".bmp":
-      return "image/bmp";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-function toBuffer(value) {
-  if (!value) {
-    return Buffer.alloc(0);
-  }
-  if (Buffer.isBuffer(value)) {
-    return value;
-  }
-  if (value instanceof Uint8Array) {
-    return Buffer.from(value);
-  }
-  return Buffer.from(value);
-}
-
 async function start() {
   const db = await openDatabase();
+  const sheetVault = openSheetVault();
+  await migrateBlobsFromCatalog(db, sheetVault);
 
   async function getSetting(key, fallback = "") {
     const row = await db.get("SELECT value FROM server_settings WHERE `key` = ?", [key]);
@@ -176,8 +144,13 @@ async function start() {
     }
 
     if (entityType === "sheet") {
+      await sheetVault.remove(syncUid);
       await tx.run("DELETE FROM sheet_files WHERE sync_uid = ?", [syncUid]);
     } else if (entityType === "piece") {
+      const pieceSheets = await tx.all("SELECT sync_uid FROM sheet_files WHERE piece_sync_uid = ?", [syncUid]);
+      for (const sheet of pieceSheets) {
+        await sheetVault.remove(sheet.sync_uid);
+      }
       await tx.run("DELETE FROM sheet_files WHERE piece_sync_uid = ?", [syncUid]);
       await tx.run("DELETE FROM pieces WHERE sync_uid = ?", [syncUid]);
     }
@@ -288,7 +261,7 @@ async function start() {
       sheet.fileName,
       sheet.contentType || "",
       sheet.contentHash || "",
-      Buffer.from(sheet.contentBase64 || "", "base64"),
+      Buffer.alloc(0),
       sheet.instrumentId ?? null,
       sheet.instrumentName || "",
       sheet.instrumentGroupId ?? null,
@@ -298,7 +271,18 @@ async function start() {
   }
 
   const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
   app.use(express.json({ limit: "200mb" }));
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "same-origin");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    if (req.path.startsWith("/api/")) {
+      res.setHeader("Cache-Control", "no-store");
+    }
+    next();
+  });
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, version: "1", db: db.dialect });
@@ -306,8 +290,12 @@ async function start() {
 
   app.post("/api/auth/login", async (req, res) => {
     const password = String(req.body?.password ?? "");
-    if (password !== (await getWebViewPassword())) {
+    const stored = await getWebViewPassword();
+    if (!(await verifyPassword(password, stored))) {
       return res.status(401).json({ error: "Ungültiges Passwort" });
+    }
+    if (!isBcryptHash(stored) && !passwordPolicyError(password)) {
+      await setSetting("web_view_password", hashPassword(password));
     }
     const token = createSessionToken();
     res.json({ ok: true, token });
@@ -403,21 +391,6 @@ async function start() {
     });
   });
 
-  app.get("/api/sheets/:syncUid/file", requireWebAuth, async (req, res) => {
-    const row = await db.get(
-      "SELECT file_name, content_type, file_data FROM sheet_files WHERE sync_uid = ?",
-      [req.params.syncUid],
-    );
-    if (!row) {
-      return res.status(404).json({ error: "Datei nicht gefunden" });
-    }
-
-    const contentType = row.content_type || guessContentType(row.file_name);
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(row.file_name)}"`);
-    res.send(toBuffer(row.file_data));
-  });
-
   app.get("/api/meta/filters", requireWebAuth, async (_req, res) => {
     const genres = (
       await db.all("SELECT DISTINCT genre FROM pieces WHERE genre IS NOT NULL AND genre != '' ORDER BY genre")
@@ -432,9 +405,16 @@ async function start() {
     const pieces = req.body?.pieces || [];
     const sheets = req.body?.sheets || [];
     const tombstones = req.body?.tombstones || [];
+    let passwordWarning = null;
 
     if (req.body?.webViewPassword) {
-      await setSetting("web_view_password", String(req.body.webViewPassword));
+      const nextPassword = String(req.body.webViewPassword);
+      const policyError = passwordPolicyError(nextPassword);
+      if (policyError) {
+        passwordWarning = policyError;
+      } else {
+        await setSetting("web_view_password", hashPassword(nextPassword));
+      }
     }
 
     await db.transaction(async (tx) => {
@@ -448,6 +428,10 @@ async function start() {
 
       for (const sheet of sheets) {
         await tx.run(upsertSheetSql, sheetParams(sheet));
+        const blob = Buffer.from(sheet.contentBase64 || "", "base64");
+        if (blob.length > 0) {
+          await sheetVault.put(sheet.syncUid, blob);
+        }
       }
 
       const sheetsByPiece = new Map();
@@ -467,6 +451,7 @@ async function start() {
 
         for (const row of serverSheets) {
           if (!clientSheetUids.has(row.sync_uid)) {
+            await sheetVault.remove(row.sync_uid);
             await tx.run("DELETE FROM sheet_files WHERE sync_uid = ?", [row.sync_uid]);
             await upsertTombstone(tx, row.sync_uid, "sheet", reconcileDeletedAt);
           }
@@ -479,6 +464,7 @@ async function start() {
       pieces: pieces.length,
       sheets: sheets.length,
       tombstones: tombstones.length,
+      passwordWarning,
     });
   });
 
@@ -490,8 +476,17 @@ async function start() {
       : await db.all("SELECT * FROM pieces ORDER BY updated_at");
 
     const sheetRows = since
-      ? await db.all("SELECT * FROM sheet_files WHERE updated_at > ? ORDER BY updated_at", [since])
-      : await db.all("SELECT * FROM sheet_files ORDER BY updated_at");
+      ? await db.all(
+          `SELECT sync_uid, piece_sync_uid, file_name, content_type, content_hash,
+                  instrument_id, instrument_name, instrument_group_id, sort_order, updated_at
+           FROM sheet_files WHERE updated_at > ? ORDER BY updated_at`,
+          [since],
+        )
+      : await db.all(
+          `SELECT sync_uid, piece_sync_uid, file_name, content_type, content_hash,
+                  instrument_id, instrument_name, instrument_group_id, sort_order, updated_at
+           FROM sheet_files ORDER BY updated_at`,
+        );
 
     const tombstoneRows = since
       ? await db.all(
@@ -503,10 +498,15 @@ async function start() {
     res.json({
       serverTime: new Date().toISOString(),
       pieces: pieceRows.map((row) => mapPieceRow(row)),
-      sheets: sheetRows.map((row) => ({
-        ...mapSheetMeta(row),
-        contentBase64: toBuffer(row.file_data).toString("base64"),
-      })),
+      sheets: await Promise.all(
+        sheetRows.map(async (row) => {
+          const blob = await sheetVault.getForDesktop(row.sync_uid);
+          return {
+            ...mapSheetMeta(row),
+            contentBase64: blob ? blob.toString("base64") : "",
+          };
+        }),
+      ),
       tombstones: tombstoneRows.map((row) => ({
         syncUid: row.sync_uid,
         entityType: row.entity_type,
@@ -525,6 +525,7 @@ async function start() {
     console.log(`MusikArchiv Server: http://${HOST}:${PORT}`);
     console.log(`Web-App:          http://localhost:${PORT}/`);
     console.log(`Datenbank:        ${db.dialect}`);
+    console.log(`Notentresor:      ${sheetVault.root} (nur Desktop-Sync, kein Webzugriff)`);
     if (API_KEY) {
       console.log("API-Schlüssel aktiv (Sync-Endpunkte geschützt).");
     }

@@ -13,6 +13,8 @@ Datei: `MusikArchivApp-portable-win-x64-v*.zip` — entpacken, `MusikArchivApp.e
 
 In der App: Einstellungen → **Aktualisierung** — Releases auflisten, Version wählen, **Aktualisieren**.
 
+Web-App: Fußzeile mit Copyright, Impressum und Datenschutz. Noten-PDFs sind in der Web-Ansicht nicht zugänglich (nur „Note … vorhanden“).
+
 Neues Release: Version in `MusikArchivApp.csproj`, `Data/AppVersion.cs` und `sync-server/package.json` hochzählen, Abschnitt in `CHANGELOG.md` anlegen, auf `main` pushen. GitHub Actions baut die ZIP und setzt `v…` plus `latest`.
 
 ## Sync-Server

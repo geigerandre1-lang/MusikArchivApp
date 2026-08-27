@@ -710,6 +710,12 @@
                         <StackPanel Margin="8">
                             <TextBlock x:Name="AppVersionText" FontWeight="SemiBold" Margin="0,0,0,4"/>
                             <TextBlock x:Name="UpdateStatusText" TextWrapping="Wrap" Foreground="#666666" Margin="0,0,0,8"/>
+                            <TextBlock Text="Version wählen" Foreground="#666666" Margin="0,0,0,4"/>
+                            <ComboBox x:Name="UpdateVersionComboBox"
+                                      DisplayMemberPath="DisplayLabel"
+                                      Margin="0,0,0,8"
+                                      MinWidth="260"
+                                      SelectionChanged="UpdateVersionComboBox_SelectionChanged"/>
                             <ProgressBar x:Name="UpdateProgressBar"
                                          Height="14"
                                          Minimum="0"
@@ -728,6 +734,11 @@
                                         IsEnabled="False"
                                         Click="InstallUpdateButton_Click"/>
                             </StackPanel>
+                            <TextBlock Text="GitHub Releases: versionierte Einträge plus Tag latest (Reiter Latest)."
+                                       Foreground="#888888"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0"
+                                       FontSize="11"/>
                         </StackPanel>
                     </GroupBox>
 

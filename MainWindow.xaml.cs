@@ -2689,9 +2689,10 @@ namespace MusikArchivApp
             try
             {
                 var latest = await AppUpdateService.CheckAsync().ConfigureAwait(true);
-                pendingAppUpdate = latest is { IsNewer: true } ? latest : null;
+                FillUpdateVersionList(latest);
+                pendingAppUpdate = latest is { IsNewer: true } ? latest : SelectedUpdate();
                 ApplyUpdateUi(latest, error: null);
-                if (!silent && pendingAppUpdate == null)
+                if (!silent && pendingAppUpdate is not { IsNewer: true })
                 {
                     UiMessage.Show(
                         latest == null
@@ -2705,6 +2706,7 @@ namespace MusikArchivApp
             catch (Exception ex)
             {
                 pendingAppUpdate = null;
+                FillUpdateVersionList(null);
                 ApplyUpdateUi(null, ex.Message);
                 if (!silent)
                 {
@@ -2720,9 +2722,39 @@ namespace MusikArchivApp
             }
         }
 
+        private void UpdateVersionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            pendingAppUpdate = SelectedUpdate();
+            ApplyUpdateUi(AppUpdateService.Latest, error: null);
+        }
+
+        private AppUpdateInfo? SelectedUpdate()
+        {
+            return UpdateVersionComboBox?.SelectedItem as AppUpdateInfo;
+        }
+
+        private void FillUpdateVersionList(AppUpdateInfo? latest)
+        {
+            if (UpdateVersionComboBox == null)
+            {
+                return;
+            }
+
+            UpdateVersionComboBox.SelectionChanged -= UpdateVersionComboBox_SelectionChanged;
+            UpdateVersionComboBox.ItemsSource = AppUpdateService.Releases;
+            var pick = latest is { IsNewer: true }
+                ? latest
+                : AppUpdateService.Releases.FirstOrDefault(item => AppUpdateService.CompareVersions(item.Version, AppVersion.Current) == 0)
+                  ?? AppUpdateService.Releases.FirstOrDefault();
+            UpdateVersionComboBox.SelectedItem = pick;
+            pendingAppUpdate = pick;
+            UpdateVersionComboBox.SelectionChanged += UpdateVersionComboBox_SelectionChanged;
+        }
+
         private async void InstallUpdateButton_Click(object sender, RoutedEventArgs e)
         {
-            if (pendingAppUpdate == null || !pendingAppUpdate.IsNewer)
+            pendingAppUpdate = SelectedUpdate() ?? pendingAppUpdate;
+            if (pendingAppUpdate == null)
             {
                 await CheckForUpdatesAsync(silent: false).ConfigureAwait(true);
                 if (pendingAppUpdate == null)
@@ -2742,8 +2774,16 @@ namespace MusikArchivApp
             }
 
             var update = pendingAppUpdate;
+            if (update == null)
+            {
+                return;
+            }
+
+            var sameVersion = AppUpdateService.CompareVersions(update.Version, AppVersion.Current) == 0;
             var confirm = UiMessage.Confirm(
-                $"Version {update.Version} herunterladen und die App neu starten?",
+                sameVersion
+                    ? $"Version {update.Version} ist bereits installiert. Trotzdem herunterladen und neu starten?"
+                    : $"Version {update.Version} herunterladen und die App neu starten?",
                 "Aktualisierung",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question);
@@ -2810,10 +2850,12 @@ namespace MusikArchivApp
 
         private void ApplyUpdateUi(AppUpdateInfo? latest, string? error)
         {
+            var selected = SelectedUpdate();
+            var hasSelection = selected != null;
             var hasUpdate = latest is { IsNewer: true };
             if (InstallUpdateButton != null)
             {
-                InstallUpdateButton.IsEnabled = hasUpdate;
+                InstallUpdateButton.IsEnabled = hasSelection;
             }
 
             if (UpdateBannerButton != null)

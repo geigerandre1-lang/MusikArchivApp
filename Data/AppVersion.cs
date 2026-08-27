@@ -4,7 +4,7 @@ namespace MusikArchivApp.Data
 {
     public static class AppVersion
     {
-        public const string Value = "1.1.1";
+        public const string Value = "1.1.2";
 
         public static string Current
         {

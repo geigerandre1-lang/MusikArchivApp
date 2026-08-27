@@ -1,0 +1,88 @@
+name: Portable Builds
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  dist-win:
+    name: Windows portable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "6.0.x"
+
+      - name: Check changelog for this version
+        shell: pwsh
+        run: node scripts/release-notes.mjs
+
+      - name: Publish portable
+        run: dotnet publish MusikArchivApp.csproj -c Release -p:PublishProfile=Properties/PublishProfiles/Portable-win-x64.pubxml --nologo
+
+      - name: Pack ZIP without data
+        shell: pwsh
+        run: |
+          $cs = Get-Content -LiteralPath Data/AppVersion.cs -Raw
+          if ($cs -notmatch 'Value\s*=\s*"([^"]+)"') { throw "AppVersion.cs ohne Version" }
+          ./scripts/pack-portable.ps1 -Version $Matches[1]
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: musikarchiv-win-portable
+          path: publish/MusikArchivApp-portable-win-x64-v*.zip
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: GitHub Release
+    needs: [dist-win]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: musikarchiv-win-portable
+          path: artifacts
+
+      - name: Version and notes
+        id: rel
+        run: |
+          VERSION=$(node -e "const fs=require('fs'); const m=fs.readFileSync('Data/AppVersion.cs','utf8').match(/Value\\s*=\\s*\\\"([^\\\"]+)\\\"/); if(!m) process.exit(1); process.stdout.write(m[1])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          node scripts/release-notes.mjs > release-notes.md
+          cat release-notes.md
+          ls -la artifacts
+
+      - name: Publish versioned GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.rel.outputs.version }}
+          name: Musikarchiv ${{ steps.rel.outputs.version }}
+          body_path: release-notes.md
+          files: artifacts/*
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          make_latest: true
+          target_commitish: ${{ github.sha }}
+
+      - name: Update rolling latest
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: v${{ steps.rel.outputs.version }} (aktuell)
+          body_path: release-notes.md
+          files: artifacts/*
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          make_latest: false
+          target_commitish: ${{ github.sha }}

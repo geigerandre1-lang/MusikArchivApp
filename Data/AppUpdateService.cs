@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,6 +18,7 @@ namespace MusikArchivApp.Data
         public string Version { get; init; } = string.Empty;
         public string Tag { get; init; } = string.Empty;
         public string Name { get; init; } = string.Empty;
+        public string DisplayLabel { get; init; } = string.Empty;
         public string DownloadUrl { get; init; } = string.Empty;
         public string AssetName { get; init; } = string.Empty;
         public long Size { get; init; }
@@ -32,6 +35,8 @@ namespace MusikArchivApp.Data
 
         public static AppUpdateInfo? Latest { get; private set; }
 
+        public static IReadOnlyList<AppUpdateInfo> Releases { get; private set; } = Array.Empty<AppUpdateInfo>();
+
         private static HttpClient CreateClient()
         {
             var client = new HttpClient
@@ -45,7 +50,7 @@ namespace MusikArchivApp.Data
 
         public static bool CanApplyInPlace()
         {
-            var exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var exeDir = GetInstallDirectory();
             if (exeDir.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
                 || exeDir.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
             {
@@ -77,27 +82,41 @@ namespace MusikArchivApp.Data
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (document.RootElement.ValueKind != JsonValueKind.Array)
             {
+                Releases = Array.Empty<AppUpdateInfo>();
                 Latest = null;
                 return null;
             }
 
-            AppUpdateInfo? newest = null;
+            var mapped = new List<AppUpdateInfo>();
             foreach (var release in document.RootElement.EnumerateArray())
             {
                 var info = TryMapRelease(release);
-                if (info == null)
+                if (info != null)
+                {
+                    mapped.Add(info);
+                }
+            }
+
+            mapped.Sort((left, right) => CompareVersions(right.Version, left.Version));
+            var unique = new List<AppUpdateInfo>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in mapped)
+            {
+                if (!seen.Add(info.Version))
                 {
                     continue;
                 }
 
-                if (newest == null || CompareVersions(info.Version, newest.Version) > 0)
+                unique.Add(info);
+                if (unique.Count >= 12)
                 {
-                    newest = info;
+                    break;
                 }
             }
 
-            Latest = newest;
-            return newest;
+            Releases = unique;
+            Latest = unique.Count > 0 ? unique[0] : null;
+            return Latest;
         }
 
         public static async Task DownloadAndApplyAsync(
@@ -140,15 +159,21 @@ namespace MusikArchivApp.Data
             }
 
             var sourceDir = Path.GetDirectoryName(extractedExe)!;
-            var targetDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var scriptPath = WriteApplyScript(Environment.ProcessId, sourceDir, targetDir);
-            Process.Start(new ProcessStartInfo
+            var targetDir = GetInstallDirectory();
+            var exePath = Path.Combine(targetDir, "MusikArchivApp.exe");
+            var scriptPath = WriteApplyScript();
+            var startInfo = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
                 Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true
-            });
+            };
+            startInfo.EnvironmentVariables["MUSIKARCHIV_UPDATE_PID"] = Environment.ProcessId.ToString();
+            startInfo.EnvironmentVariables["MUSIKARCHIV_UPDATE_SOURCE"] = sourceDir;
+            startInfo.EnvironmentVariables["MUSIKARCHIV_UPDATE_TARGET"] = targetDir;
+            startInfo.EnvironmentVariables["MUSIKARCHIV_UPDATE_EXE"] = exePath;
+            Process.Start(startInfo);
         }
 
         private static async Task DownloadFileAsync(
@@ -179,31 +204,98 @@ namespace MusikArchivApp.Data
             }
         }
 
-        private static string WriteApplyScript(int pid, string sourceDir, string targetDir)
+        private static string GetInstallDirectory()
         {
-            var scriptPath = Path.Combine(Path.GetTempPath(), $"musikarchiv-apply-{pid}.ps1");
-            var exePath = Path.Combine(targetDir, "MusikArchivApp.exe");
-            var script = $@"$pidToWait = {pid}
-$source = {PsQuote(sourceDir)}
-$target = {PsQuote(targetDir)}
-$exe = {PsQuote(exePath)}
-while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
-  Start-Sleep -Milliseconds 400
-}}
-Start-Sleep -Milliseconds 800
-Get-ChildItem -LiteralPath $source -Force | ForEach-Object {{
-  if ($_.Name -ieq 'data') {{ return }}
-  $dest = Join-Path $target $_.Name
-  Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
-}}
-Start-Process -FilePath $exe
-Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
-";
-            File.WriteAllText(scriptPath, script);
-            return scriptPath;
+            var processPath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(processPath))
+            {
+                var dir = Path.GetDirectoryName(processPath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                {
+                    return dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                }
+            }
+
+            return AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
-        private static string PsQuote(string value) => "'" + value.Replace("'", "''") + "'";
+        private static string WriteApplyScript()
+        {
+            var scriptPath = Path.Combine(Path.GetTempPath(), $"musikarchiv-apply-{Environment.ProcessId}.ps1");
+            const string script = @"
+$log = Join-Path $env:TEMP 'musikarchiv-update.log'
+function Write-UpdateLog([string]$message) {
+  Add-Content -LiteralPath $log -Value ((Get-Date -Format 'o') + ' ' + $message)
+}
+
+$pidToWait = 0
+[void][int]::TryParse($env:MUSIKARCHIV_UPDATE_PID, [ref]$pidToWait)
+$source = $env:MUSIKARCHIV_UPDATE_SOURCE
+$target = $env:MUSIKARCHIV_UPDATE_TARGET
+$exe = $env:MUSIKARCHIV_UPDATE_EXE
+Write-UpdateLog ('start pid=' + $pidToWait + ' source=' + $source + ' target=' + $target)
+
+if (-not $source -or -not $target -or -not $exe) {
+  Write-UpdateLog 'missing environment variables'
+  exit 1
+}
+
+while ($pidToWait -gt 0 -and (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) {
+  Start-Sleep -Milliseconds 400
+}
+Start-Sleep -Milliseconds 1000
+
+function Copy-Replace([string]$src, [string]$dst) {
+  if ((Get-Item -LiteralPath $src).PSIsContainer) {
+    if (-not (Test-Path -LiteralPath $dst)) {
+      New-Item -ItemType Directory -Path $dst | Out-Null
+    }
+    Get-ChildItem -LiteralPath $src -Force | ForEach-Object {
+      if ($_.Name -ieq 'data') { return }
+      Copy-Replace $_.FullName (Join-Path $dst $_.Name)
+    }
+    return
+  }
+
+  $tmp = $dst + '.new'
+  $attempt = 0
+  while ($attempt -lt 40) {
+    try {
+      Copy-Item -LiteralPath $src -Destination $tmp -Force
+      if (Test-Path -LiteralPath $dst) {
+        Remove-Item -LiteralPath $dst -Force -ErrorAction Stop
+      }
+      Move-Item -LiteralPath $tmp -Destination $dst -Force
+      return
+    } catch {
+      Start-Sleep -Milliseconds 500
+      $attempt++
+    }
+  }
+  throw ('cannot replace ' + $dst)
+}
+
+try {
+  Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
+    if ($_.Name -ieq 'data') { return }
+    Copy-Replace $_.FullName (Join-Path $target $_.Name)
+  }
+  Write-UpdateLog 'copy ok'
+  Start-Process -FilePath $exe -WorkingDirectory $target
+} catch {
+  Write-UpdateLog ('copy failed: ' + $_)
+  try {
+    Start-Process -FilePath $exe -WorkingDirectory $target
+  } catch {}
+  $wshell = New-Object -ComObject Wscript.Shell
+  [void]$wshell.Popup('Update konnte nicht vollstaendig angewendet werden. Die vorherige Version wurde gestartet. Log: ' + $log, 0, 'Musikarchiv', 16)
+}
+
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+";
+            File.WriteAllText(scriptPath, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+            return scriptPath;
+        }
 
         private static AppUpdateInfo? TryMapRelease(JsonElement release)
         {
@@ -235,15 +327,19 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
                 return null;
             }
 
+            var newer = CompareVersions(version, AppVersion.Current) > 0;
+            var current = CompareVersions(version, AppVersion.Current) == 0;
+            var suffix = newer ? " — neuer" : current ? " — aktuell" : string.Empty;
             return new AppUpdateInfo
             {
                 Version = version,
                 Tag = tag ?? $"v{version}",
                 Name = release.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? version : version,
+                DisplayLabel = version + suffix,
                 DownloadUrl = asset.Value.url,
                 AssetName = asset.Value.name,
                 Size = asset.Value.size,
-                IsNewer = CompareVersions(version, AppVersion.Current) > 0
+                IsNewer = newer
             };
         }
 

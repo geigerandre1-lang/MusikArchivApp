@@ -9,6 +9,16 @@ Alle nennenswerten Änderungen. Die Versionsnummer steht in `MusikArchivApp.cspr
 
 Portable ZIP: `MusikArchivApp-portable-win-x64-v*.zip` — entpacken und `MusikArchivApp.exe` starten, kein Setup. Den Ordner `data/` nicht aus einem fremden ZIP übernehmen.
 
+## [1.1.4] - 2026-08-27
+
+### Neu
+
+- Desktop und Web: Web-Datenbank leeren (Stücke, Notenlisten, Notentresor). Das Web-Passwort bleibt erhalten.
+
+### Behoben
+
+- Web-App: Filter (Suche, Gattung, Schrank, Nur mit Noten, Nur im Probelokal) und Detailansicht.
+
 ## [1.1.3] - 2026-08-27
 
 ### Geändert

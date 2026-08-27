@@ -12,7 +12,7 @@ $stage = Join-Path $root "publish\portable-stage"
 $zip = Join-Path $root "publish\MusikArchivApp-portable-win-x64-v$Version.zip"
 
 if (-not (Test-Path -LiteralPath (Join-Path $out "MusikArchivApp.exe"))) {
-    throw "MusikArchivApp.exe fehlt in $out — zuerst dotnet publish."
+    throw "MusikArchivApp.exe missing in $out. Run dotnet publish first."
 }
 
 if (Test-Path -LiteralPath $stage) {
@@ -35,10 +35,10 @@ $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $names = $archive.Entries | ForEach-Object { $_.FullName.Replace("\", "/") }
     if ($names | Where-Object { $_ -eq "data" -or $_.StartsWith("data/") }) {
-        throw "ZIP enthält data/ — das darf nicht ins Release."
+        throw "ZIP contains data/ which must not be in the release."
     }
     if (-not ($names | Where-Object { $_ -eq "MusikArchivApp.exe" })) {
-        throw "ZIP enthält keine MusikArchivApp.exe im Root."
+        throw "ZIP is missing MusikArchivApp.exe at the root."
     }
 }
 finally {
